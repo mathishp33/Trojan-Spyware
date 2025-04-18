@@ -9,6 +9,7 @@
 # Features
 
 ✅ Delete and add directories
+
 ✅ Delete files
+
 ✅ Navigate through the client's pc
-✅ 
