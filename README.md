@@ -1,4 +1,7 @@
-# Trojan-Spyware
+# Usage
 
-A trojan or a spyware depending on what you use it for.
--[x] d
+→ Start both server.py and victim.py scripts on DIFFERENT computers
+
+↳ send command through the server (type help to get some)
+
+✅
