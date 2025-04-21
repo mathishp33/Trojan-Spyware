@@ -52,6 +52,7 @@ class App:
                             if not chunk:
                                 break
                             recv_file += chunk
+                            print(f"Received {len(recv_file)}/{int(header[2])} bytes")
                             
                         with open(f"received_{header[1]}", "wb") as f:
                             f.write(recv_file)
@@ -85,6 +86,7 @@ class App:
             
             except:
                 running = False
+                break
             
         client.close()
                 
