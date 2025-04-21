@@ -21,3 +21,5 @@
 ✅ Keylogger
 
 ✅ Take screenshot of client's screen
+
+✅ Get client's specs
