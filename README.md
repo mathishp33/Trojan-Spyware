@@ -13,3 +13,11 @@
 ✅ Delete files
 
 ✅ Navigate through the client's pc
+
+✅ Download client's files (folder must be zipped)
+
+✅ Zip anything
+
+✅ Keylogger
+
+✅ Take screenshot of client's screen
