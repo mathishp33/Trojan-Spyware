@@ -14,7 +14,7 @@ cd --goto to a specified directory
 
     cd folder
     
-    cd .. --to go back
+    cd ..
 
 mkdir --create a new directory with the given name
 
@@ -96,11 +96,11 @@ keylogger --keylogger class
 
 ↳ usage :
     
-    keylogger on --turn on the keylogger
+    keylogger on
 
-    keylogger off --turn off the keylogger
+    keylogger off
 
-    keylogger get --return all the keylogger's informations
+    keylogger get
 
 
 exit --exit the connection
