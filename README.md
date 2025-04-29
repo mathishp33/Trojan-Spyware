@@ -1,10 +1,18 @@
 # Usage
 
-→ Start both server.py and victim.py scripts on DIFFERENT computers
+→ Start both real_project/main.py and real_project/client.py scripts (set the server ip in the client's file)
 
-↳ send command through the server (type help to get some)
+↳ Click on "Connection"
 
-↳ the client (or victim) will execute the commands
+↳ Then on "New Connection"
+
+↳ Then on "Start Search"
+
+↳ Then on the client you want to connect
+
+↳ Finally on "Submit Connection"
+
+→ You can now communicate through the cmd in the main window !
 
 # Commands
 
