@@ -24,6 +24,10 @@
 
 🌐 File upload/download
 
+⚙️ Execute files
+
+🧾 Logs
+
 🗃️ Zipping/Unzipping files/folders remotely
 
 🖥️ Get system info (OS, IP, CPU, RAM)
@@ -37,5 +41,3 @@
 🧬 Basic authentication between client/server
 
 ⛔ Prevent duplicate clients (lockfile or unique ID check)
-
-
