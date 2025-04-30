@@ -41,3 +41,7 @@
 🧬 Basic authentication between client/server
 
 ⛔ Prevent duplicate clients (lockfile or unique ID check)
+
+📁 File explorer GUI
+
+📅 Task scheduling
