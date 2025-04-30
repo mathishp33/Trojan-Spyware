@@ -1,3 +1,11 @@
+# Remote Administration Tool (RAT)
+
+This software is intended for authorized use only.
+
+Unauthorized access or surveillance without consent
+
+is illegal and unethical under most jurisdictions.
+
 # Usage
 
 → Start both main.py and client.py scripts (set the server ip in the client's file)
