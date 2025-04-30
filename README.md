@@ -40,7 +40,7 @@
 
 🧬 Basic authentication between client/server
 
-⛔ Prevent duplicate clients (lockfile or unique ID check)
+⛔ Prevent duplicate clients
 
 📁 File explorer GUI
 
