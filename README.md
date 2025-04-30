@@ -1,10 +1,6 @@
 # Remote Administration Tool (RAT)
 
-This software is intended for authorized use only.
-
-Unauthorized access or surveillance without consent
-
-is illegal and unethical under most jurisdictions.
+This software is intended for authorized use only. Unauthorized access or surveillance without consent is illegal and unethical under most jurisdictions.
 
 # Usage
 
