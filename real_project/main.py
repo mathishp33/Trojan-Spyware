@@ -20,9 +20,9 @@ class App():
         self.log = Log()
 
         self.password = "Id6-DIjjf032_ddo"
-        self.port = 5203
-        self.max_clients = 10
-        self.timeout = 2
+        self.port = port
+        self.max_clients = max_clients
+        self.timeout = timeout
         self.selected_client = ["", ""]
         self.socket = None
         self.client = None
@@ -32,7 +32,8 @@ class App():
         self.menu_bar = tk.Menu(self.root)
 
         self.filemenu = tk.Menu(self.menu_bar, tearoff=0)
-        self.filemenu.add_command(label="New Connection", command=self.conn_manager)
+        #self.filemenu.add_command(label="New Connection", command=self.conn_manager)
+        self.filemenu.add_command(label="New Connection", command=lambda: threading.Thread(target=self.conn_manager, daemon=True).start())
         self.filemenu.add_separator()
         self.filemenu.add_command(label="Close Connection", command=self.close_conn)
         self.menu_bar.add_cascade(label="Connection", menu=self.filemenu)
@@ -71,46 +72,45 @@ class App():
             pass
 
     def conn_manager(self):
-        def search():
-            self.log.add("new connection ?")
-            conn_manager_ = ConnMaker()
-            self.selected_client = conn_manager_.selected_client
-            if self.selected_client != ["", ""]:
-                self.port = conn_manager_.port
-                self.max_clients = conn_manager_.max_clients.get()
-                self.timeout = conn_manager_.timeout.get()
-                self.socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None)
-                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                self.socket.bind(("0.0.0.0", self.port))
-                self.socket.listen(self.max_clients)
-                self.socket.settimeout(1.0)
-    
-                while self.client == None:
-                    time0 = time.time()
-                    while time0 + self.timeout > time.time():
-                        try:
-                            client, client_addr = self.socket.accept()
-                            ssock = self.context.wrap_socket(client, server_side=True)
-                            data = ssock.recv(1024).decode()
-                            if client_addr[0] == self.selected_client[0]:
-                                ssock.send(b"SELECTED")
-                                time.sleep(0.05)
-                                password = ssock.recv(1024).decode()
-                                id_ = ssock.recv(1024).decode()
-                                if self.password == password and id_ == self.selected_client[1]:
-                                    ssock.send(b"GRANTED")
-                                    self.id = id_
-                                    self.client = ssock
-                                    self.client_addr = client_addr
-                                    self.log.add(f"connected to client : {self.selected_client}")
-                                return True
-                            else:
-                                ssock.sendall(b"PINGED")
-                                ssock.close()
-                            time.sleep(0.1)
-                        except Exception as e:
-                            self.log.add(f"error while trying to select a client in conn_manager function : {e}")
-        threading.Thread(target=search, daemon=True).start()
+        conn_manager_ = ConnMaker()
+        self.log.add("new connection ?")
+        self.selected_client = conn_manager_.selected_client
+        if self.selected_client != ["", ""]:
+            self.socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind(("0.0.0.0", self.port))
+            self.socket.listen(self.max_clients)
+            self.socket.settimeout(1.0)
+            
+            time0 = time.time()
+            while self.client == None and time.time() < time0 + self.timeout:
+                try:
+                    client, client_addr = self.socket.accept()
+                    ssock = self.context.wrap_socket(client, server_side=True)
+                    data = ssock.recv(1024).decode()
+                    print("dd")
+                    if client_addr[0] == self.selected_client[0]:
+                        print("d")
+                        ssock.send(b"SELECTED")
+                        password = ssock.recv(1024).decode()
+                        id_ = ssock.recv(1024).decode()
+                        if self.password == password and id_ == self.selected_client[1]:
+                            ssock.send(b"GRANTED")
+                            self.id = id_
+                            self.client = ssock
+                            self.client_addr = client_addr
+                            self.log.add(f"connected to client : {self.selected_client}")
+                            return True
+                    else:
+                        ssock.sendall(b"PINGED")
+                        data = ssock.recv(1024)
+                        ssock.close()
+                    time.sleep(0.1)
+                except Exception as e:
+                    self.log.add(f"error while trying to select a client in conn_manager function : {e}")
+                    
+        if self.client == None:
+            self.log.add("unable to connect to client")
         
     def clear_terminal(self):
         pass
@@ -122,6 +122,7 @@ class CMD():
         self.text.pack()
         
         self.prevent_exit = False
+        self.output = [None, None]
         
         self.text.bind("<BackSpace>", self.prevent_backspace)
         self.text.bind("<Return>", self.handle_enter)
@@ -207,7 +208,12 @@ class CMD():
                         self.text.insert(tk.END, "\nError !")
                         app.log.add(f"error while sending file in execute_command function : {e}")
                         
-                header, data = comm(app.client, f"COMMAND:{len(data)}:NONE", data)
+                thread = threading.Thread(target=self.communication, daemon=True, args=(data, ))
+                thread.start()
+                thread.join()
+                
+                header = self.output[0]
+                data = self.output[1]
                 app.log.add(f"received header : {header}")
                 header = header.split(":")
                 
@@ -241,27 +247,28 @@ class CMD():
 
         self.prompt()
         
+    def communication(self, data):
+        app.log.add("trying to send command ...")
+        header, data = comm(app.client, f"COMMAND:{len(data)}:NONE", data)
+        self.output = [header, data]
+        
         
 class ConnMaker():
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Connection Manager")
-        self.root.geometry("300x300")
+        self.root.geometry("300x400")
         self.running = True
 
-        self.max_clients = tk.IntVar(self.root, app.max_clients)
+        self.max_clients = app.max_clients
         self.port = app.port
         self.clients = []
         self.ids = []
-        self.timeout = tk.IntVar(self.root, app.timeout)
+        self.timeout = app.timeout
         self.selected_client = ["", ""]
 
-        tk.Label(self.root, text="Max Clients : ").pack()
-        tk.Entry(self.root, textvariable=self.max_clients).pack()
-        tk.Label(self.root, text="Timeout : ").pack()
-        tk.Entry(self.root, textvariable=self.timeout).pack()
         tk.Button(self.root, text="Start Search", command=self.update_search).pack()
-        self.conn_list = tk.Listbox(self.root, width=50)
+        self.conn_list = tk.Listbox(self.root, width=50, height=20)
         self.conn_list.pack()
         tk.Button(self.root, text="Submit Connection", command=self.submit_client).pack()
 
@@ -271,8 +278,9 @@ class ConnMaker():
         try:
             selections = self.conn_list.curselection()
             if len(selections) == 1:
-                self.selected_client = [self.conn_list.get(selections[0]), self.ids[selections[0]]]
+                self.selected_client = [self.clients[selections[0]], self.ids[selections[0]]]
                 self.root.destroy()
+                app.log.add(f"selected : {self.selected_client}")
                 print("selected : ", self.selected_client)
             else:
                 print("selection not valid !")
@@ -280,43 +288,39 @@ class ConnMaker():
             print(2, "error !")
 
     def update_search(self):
-        def search():
-            local_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None)
-            local_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            local_socket.bind(("0.0.0.0", self.port))
-            local_socket.listen(self.max_clients.get())
-            local_socket.settimeout(1.0)
+        self.conn_list.delete(0, tk.END)
+        self.clients = []
+        self.ids = []
+        local_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None)
+        local_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        local_socket.bind(("0.0.0.0", self.port))
+        local_socket.listen(self.max_clients)
+        local_socket.settimeout(1.0)
 
-            time0 = time.time()
-            self.conn_list.delete(0, tk.END)
-            self.clients = []
-            self.ids = []
-            timeout = self.timeout.get()
-            while time0 + timeout > time.time():
-                try:
-                    client, client_addr = local_socket.accept()
-                    ssock = app.context.wrap_socket(client, server_side=True)
-                    data = ssock.recv(1024).decode()
-                    time.sleep(0.1)
-                    ssock.sendall(b"PINGED")
-                    if (client_addr[0] not in self.clients) and data == "IDLE":
-                        self.clients.append(client_addr[0])
-                        self.ids.append(ssock.recv(1024).decode())
-                    time.sleep(0.1)
-                    ssock.close()
-                except Exception as e:
-                    app.log.add(f"error while trying to connect to a potential client : {e}")
-                    
+        time0 = time.time()
+        timeout = self.timeout
+        while time0 + timeout > time.time():
             try:
-                for i, j in enumerate(self.clients):
-                    self.conn_list.insert(i, f"ip address : {j}        id : {self.ids[i]}")
-            except:
-                return False
-            return True
-        
-        threading.Thread(target=search, daemon=True).start()
-        
-        
+                client, client_addr = local_socket.accept()
+                ssock = app.context.wrap_socket(client, server_side=True)
+                data = ssock.recv(1024).decode()
+                time.sleep(0.1)
+                ssock.sendall(b"PINGED")
+                if (client_addr[0] not in self.clients) and data == "IDLE":
+                    self.clients.append(client_addr[0])
+                    self.ids.append(ssock.recv(1024).decode())
+                ssock.close()
+            except Exception as e:
+                app.log.add(f"error while trying to connect to a potential client : {e}")
+                
+        local_socket.close()
+        try:
+            for i, j in enumerate(self.clients):
+                self.conn_list.insert(i, f"ip address : {j}        id : {self.ids[i]}")
+        except Exception as e:
+            print("trucc", e)
+            app.log.add(f"error while updating ListBox in update_search : {e}")
+
 class Log():
     def __init__(self):
         self.name = f"{time.time()}.txt"
@@ -356,6 +360,7 @@ def comm(client, header, data):
             bytes_data += packet
         data = pickle.loads(bytes_data)
         
+        app.log.add("received header and data in comm function")
         return header, data
     except Exception as e:
         app.log.add(f"error in comm function : {e}")
@@ -363,7 +368,7 @@ def comm(client, header, data):
     
 
 if __name__ == "__main__":
-    app = App(5203, 10, 2) #port(must be same as client), max client the server can handle, timeout in seconds
+    app = App(55277, 20, 3) #port(must be same as client), max client the server can handle, timeout in seconds
     app.run()
     try:
         app.socket.close()
