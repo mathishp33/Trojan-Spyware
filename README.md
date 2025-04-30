@@ -1,6 +1,6 @@
 # Usage
 
-→ Start both real_project/main.py and real_project/client.py scripts (set the server ip in the client's file)
+→ Start both main.py and client.py scripts (set the server ip in the client's file)
 
 ↳ Click on "Connection"
 
