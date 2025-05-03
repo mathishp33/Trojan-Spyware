@@ -38,6 +38,8 @@ This software is intended for authorized use only. Unauthorized access or survei
 
 📸 Screenshot capture
 
+👁️ Screen monitoring
+
 ⌨️ Keylogger
 
 🔒 Encrypted communication with ssl
