@@ -20,6 +20,22 @@ This software is intended for authorized use only. Unauthorized access or survei
 → You can now communicate through the cmd in the main window !
 
 
+# Requirements
+
+before running main.py and client.py, you need to make sure you installed : 
+
+- mss
+- pynput
+- opencv-python
+- numpy
+- pyautogui
+- requests
+
+you can do it using pip : 
+
+        pip install mss pynput psutil opencv-python numpy pyautogui requests
+
+
 # Features
 
 🛠️ CMD commands
@@ -262,3 +278,24 @@ press desired keys in order and then release them in reverse order :
 
 hold the desired key down :
 
+    keydown h
+    keydown "alt"
+
+release the desired key :
+
+    keyup h
+    keyup "alt"
+
+display a popup with a timeout of 100 sec :
+
+    alert "you are being watched !" "Warning !"
+    alert :) HELLO
+    # args are : text(str), title(str)
+
+get the current screen size :
+
+    screensize
+
+shutdown the client :
+
+    close
